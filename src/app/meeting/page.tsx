@@ -16,7 +16,6 @@ const generateAnonymousId = () => {
     return 'user_meeting_' + Math.random().toString(36).substring(2, 15);
 };
 
-
 export default function MeetingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -53,7 +52,6 @@ export default function MeetingPage() {
     setErrorMsg(null);
   }, [router, toast]);
 
-
   const handleLeaveCall = useCallback(() => {
     console.log("[MeetingPage] User requested to leave call.");
     toast({ title: "انتهت المكالمة", description: "لقد غادرت استشارة الفيديو." });
@@ -61,7 +59,6 @@ export default function MeetingPage() {
     setManualRoomIdInput(''); 
     router.replace('/meeting', { scroll: false }); 
   }, [router, toast]);
-
 
   useEffect(() => {
       if (isLoading) return;
