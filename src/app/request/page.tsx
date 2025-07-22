@@ -1,5 +1,6 @@
 
 "use client";
+export const dynamic = "force-dynamic";
 
 import SubmissionForm from '@/components/forms/SubmissionForm';
 import { useSearchParams } from "next/navigation";
