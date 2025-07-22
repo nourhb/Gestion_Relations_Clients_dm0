@@ -1,0 +1,305 @@
+
+"use server";
+
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, doc, updateDoc, Timestamp, setDoc, getDoc, serverTimestamp, addDoc, writeBatch, deleteDoc } from "firebase/firestore";
+import { z } from "zod";
+import { addDays, format, startOfWeek } from 'date-fns';
+
+const SERVICE_PROVIDER_UID = "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
+const ADMIN_DISPLAY_NAME = "DigitalMen0 دعم";
+
+interface SelectedSlot {
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+}
+
+export interface ServiceRequestAdminView {
+  id: string;
+  userId: string;
+  name: string;
+  surname: string;
+  email: string;
+  phone: string;
+  serviceType: "coaching" | "consultation";
+  meetingType: "online" | "in-person";
+  problemDescription: string;
+  selectedSlots: SelectedSlot[];
+  paymentProofInfo: {
+    cloudinaryUrl?: string;
+    cloudinaryPublicId?: string;
+    fileName?: string;
+    fileType?: string;
+  };
+  status: string;
+  createdAt: string; // ISO string or formatted date
+  userEmail: string;
+  userName: string;
+  meetingUrl: string | null;
+}
+
+interface FetchRequestsResult {
+  success: boolean;
+  requests?: ServiceRequestAdminView[];
+  error?: string;
+}
+
+export async function fetchProviderServiceRequests(providerUid: string): Promise<FetchRequestsResult> {
+  if (providerUid !== SERVICE_PROVIDER_UID) {
+    return { success: false, error: "وصول غير مصرح به إلى طلبات المزود." };
+  }
+
+  try {
+    const requestsCollectionRef = collection(db, "serviceRequests");
+    const q = query(requestsCollectionRef, where("providerId", "==", providerUid));
+    const querySnapshot = await getDocs(q);
+
+    const requests: ServiceRequestAdminView[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      let createdAtStr = '';
+      if (data.createdAt && data.createdAt instanceof Timestamp) {
+        createdAtStr = data.createdAt.toDate().toISOString();
+      } else if (data.createdAt) {
+        createdAtStr = String(data.createdAt);
+      }
+
+      requests.push({
+        id: docSnap.id,
+        userId: data.userId || '',
+        name: data.name || '',
+        surname: data.surname || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        serviceType: data.serviceType || 'consultation',
+        meetingType: data.meetingType || 'online',
+        problemDescription: data.problemDescription || '',
+        selectedSlots: data.selectedSlots || [],
+        paymentProofInfo: data.paymentProofInfo || { fileName: '', fileType: '' },
+        status: data.status || 'pending',
+        createdAt: createdAtStr,
+        userEmail: data.userEmail || '',
+        userName: data.userName || '',
+        meetingUrl: data.meetingUrl || null,
+      });
+    });
+
+    requests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return { success: true, requests };
+  } catch (error: any) {
+    console.error("Error fetching provider service requests:", error);
+    return { success: false, error: error.message || "حدث خطأ غير متوقع أثناء جلب طلبات الخدمة." };
+  }
+}
+
+interface UpdateRequestResult {
+  success: boolean;
+  error?: string;
+}
+
+export async function updateServiceRequestAdminDetails(
+  requestId: string,
+  data: { status?: string; meetingUrl?: string | null }
+): Promise<UpdateRequestResult> {
+  if (!requestId) {
+    return { success: false, error: "معرف الطلب مطلوب." };
+  }
+
+  try {
+    const updateData: Record<string, any> = {};
+    if (data.status !== undefined) {
+      updateData.status = data.status;
+    }
+    if (data.meetingUrl !== undefined) {
+      updateData.meetingUrl = data.meetingUrl === '' ? null : data.meetingUrl;
+    }
+    
+    if (Object.keys(updateData).length === 0) {
+        return { success: false, error: "لم يتم تقديم أي بيانات للتحديث." };
+    }
+
+    const requestDocRef = doc(db, "serviceRequests", requestId);
+    await updateDoc(requestDocRef, updateData);
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error updating service request:", error);
+    if (error instanceof z.ZodError) {
+      const formattedErrors = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ');
+      return { success: false, error: `بيانات غير صالحة: ${formattedErrors}` };
+    }
+    return { success: false, error: error.message || "حدث خطأ غير متوقع أثناء تحديث الطلب." };
+  }
+}
+
+
+// New Action to create a chat session from the admin side
+interface CreateChatResult {
+  success: boolean;
+  chatId?: string;
+  error?: string;
+}
+
+const getChatId = (uid1: string, uid2: string): string => {
+  const ids = [uid1, uid2].sort();
+  return ids.join("_");
+};
+
+export async function createChatSessionFromAdmin(clientUid: string, clientName: string): Promise<CreateChatResult> {
+    if (!clientUid || !clientName) {
+        return { success: false, error: "معرف العميل واسمه مطلوبان." };
+    }
+
+    const adminUid = SERVICE_PROVIDER_UID;
+    const chatId = getChatId(adminUid, clientUid);
+
+    try {
+        const chatSessionDocRef = doc(db, "chatSessions", chatId);
+        const chatSessionSnap = await getDoc(chatSessionDocRef);
+
+        if (chatSessionSnap.exists()) {
+            // Chat already exists, which is fine.
+            return { success: true, chatId: chatId };
+        }
+
+        const participantsArray = [clientUid, adminUid].sort();
+        const participantNamesMap = {
+            [clientUid]: clientName,
+            [adminUid]: ADMIN_DISPLAY_NAME,
+        };
+
+        await setDoc(chatSessionDocRef, {
+            participants: participantsArray,
+            participantUids: {
+                uid1: participantsArray[0],
+                uid2: participantsArray[1]
+            },
+            participantNames: participantNamesMap,
+            lastMessageText: "بدأ المدير المحادثة.",
+            lastMessageTimestamp: serverTimestamp(),
+            lastMessageSenderId: adminUid,
+            clientUid: clientUid,
+            clientName: clientName,
+            adminUid: adminUid,
+            adminName: ADMIN_DISPLAY_NAME,
+        }, { merge: true });
+
+        return { success: true, chatId: chatId };
+    } catch (error: any) {
+        console.error("Error creating chat session from admin:", error);
+        return { success: false, error: error.message || "حدث خطأ غير متوقع." };
+    }
+}
+
+
+// --- DATA SEEDING ACTION ---
+export async function seedServiceRequests(): Promise<{ success: boolean, error?: string }> {
+  if (!db) {
+    return { success: false, error: "قاعدة البيانات غير مهيأة" };
+  }
+
+  const fakeUsers = [
+    { userId: 'fakeuser_zied_1', name: 'Zied', surname: 'Trabelsi', email: 'zied.trabelsi@email.com', phone: '+216 22 123 456', problem: 'Need coaching for my new e-commerce startup focused on local crafts.', service: 'coaching', meetingType: 'online' },
+    { userId: 'fakeuser_fatima_2', name: 'Fatima', surname: 'Ben Ali', email: 'fatima.benali@email.com', phone: '+216 55 789 012', problem: 'Looking for a consultation on improving my social media marketing strategy.', service: 'consultation', meetingType: 'in-person' },
+    { userId: 'fakeuser_amir_3', name: 'Amir', surname: 'Guellouz', email: 'amir.guellouz@email.com', phone: '+216 98 345 678', problem: 'I need long-term coaching for SEO and content creation for my travel blog.', service: 'coaching', meetingType: 'online' },
+    { userId: 'fakeuser_sofia_4', name: 'Sofia', surname: 'Khemir', email: 'sofia.khemir@email.com', phone: '+216 21 901 234', problem: 'I have a project idea but need a one-time consultation to validate the technical feasibility.', service: 'consultation', meetingType: 'online' },
+    { userId: 'fakeuser_youssef_5', name: 'Youssef', surname: 'Chebbi', email: 'youssef.chebbi@email.com', phone: '+216 53 567 890', problem: 'I am transitioning careers into digital marketing and need a 4-session coaching plan.', service: 'coaching', meetingType: 'in-person' },
+    { userId: 'fakeuser_nourelhouda_6', name: 'Nour El Houda', surname: 'Bouajila', email: 'nourelhouda.bouajila@iteam-univ.tn', phone: '+216 50 111 222', problem: 'Require consultation about my final year project on AI-powered marketing tools.', service: 'consultation', meetingType: 'online' },
+  ];
+
+  const today = new Date();
+  const startOfThisWeek = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+
+  try {
+    const batch = writeBatch(db);
+
+    for (let i = 0; i < fakeUsers.length; i++) {
+      const user = fakeUsers[i];
+      const serviceRequestRef = doc(collection(db, "serviceRequests"));
+      
+      const appointmentDay = addDays(startOfThisWeek, i + 1); // Tue, Wed, Thu, Fri, Sat, Sun
+      const appointmentTime = `${10 + i}:00`; // 10:00, 11:00, etc.
+      
+      const appointmentDateTime = new Date(appointmentDay);
+      const [hours, minutes] = appointmentTime.split(':').map(Number);
+      appointmentDateTime.setHours(hours, minutes);
+
+
+      // 1. Create Service Request
+      batch.set(serviceRequestRef, {
+        userId: user.userId,
+        providerId: SERVICE_PROVIDER_UID,
+        name: user.name,
+        surname: user.surname,
+        email: user.email,
+        phone: user.phone,
+        serviceType: user.service,
+        meetingType: user.meetingType,
+        problemDescription: user.problem,
+        selectedSlots: [{ date: format(appointmentDay, "yyyy-MM-dd"), time: appointmentTime }],
+        paymentProofInfo: user.service === 'consultation' ? {
+          cloudinaryUrl: 'https://placehold.co/600x400.png',
+          fileName: 'fake_proof.png'
+        } : null,
+        status: 'confirmed',
+        createdAt: serverTimestamp(),
+        userEmail: user.email,
+        userName: `${user.name} ${user.surname}`,
+        meetingUrl: serviceRequestRef.id, // The Room ID is now the same as the request ID
+      });
+
+      // 2. Create corresponding Video Consultation log
+      const videoConsultRef = doc(collection(db, "videoConsults"));
+      batch.set(videoConsultRef, {
+        roomId: serviceRequestRef.id,
+        serviceRequestId: serviceRequestRef.id,
+        userId: user.userId,
+        userName: `${user.name} ${user.surname}`,
+        providerId: SERVICE_PROVIDER_UID,
+        providerName: ADMIN_DISPLAY_NAME,
+        status: 'scheduled',
+        createdAt: serverTimestamp(),
+        consultationTime: Timestamp.fromDate(appointmentDateTime),
+      });
+    }
+
+    await batch.commit();
+    return { success: true };
+
+  } catch (error: any) {
+    console.error("Error seeding database:", error);
+    return { success: false, error: error.message || "حدث خطأ غير متوقع أثناء ملء قاعدة البيانات." };
+  }
+}
+
+// --- NEW ACTION for bulk deletion ---
+interface DeleteResult {
+  success: boolean;
+  deletedCount: number;
+  error?: string;
+}
+
+export async function deleteServiceRequests(requestIds: string[]): Promise<DeleteResult> {
+    if (!db) {
+      return { success: false, error: "قاعدة البيانات غير مهيأة.", deletedCount: 0 };
+    }
+    if (!requestIds || requestIds.length === 0) {
+      return { success: false, error: "لم يتم تقديم أي معرفات للحذف.", deletedCount: 0 };
+    }
+
+    try {
+        const batch = writeBatch(db);
+        requestIds.forEach(id => {
+            const docRef = doc(db, "serviceRequests", id);
+            batch.delete(docRef);
+        });
+
+        await batch.commit();
+        return { success: true, deletedCount: requestIds.length };
+
+    } catch (error: any) {
+        console.error("Error deleting service requests:", error);
+        return { success: false, error: "حدث خطأ أثناء حذف الطلبات.", deletedCount: 0 };
+    }
+}
