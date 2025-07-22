@@ -29,6 +29,7 @@ export default function MeetingPage() {
 
   // Effect to manage anonymous user ID
   useEffect(() => {
+    if (typeof window === "undefined") return; // Only run in browser
     let currentId = localStorage.getItem('anonymousMeetingId');
     if (!currentId) {
       currentId = generateAnonymousId();
@@ -62,7 +63,7 @@ export default function MeetingPage() {
 
   useEffect(() => {
       if (isLoading) return;
-
+      if (typeof window === "undefined") return; // Only run in browser
       const roomIdFromQuery = searchParams.get('roomId');
       if (roomIdFromQuery && roomIdFromQuery !== currentRoomId) {
           handleJoinCall(roomIdFromQuery);
