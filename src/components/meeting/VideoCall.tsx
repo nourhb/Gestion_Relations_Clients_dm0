@@ -45,6 +45,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [retryCount, setRetryCount] = useState(0);
     const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
     const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
+    const [callEnded, setCallEnded] = useState(false);
 
     useEffect(() => {
         onHangUpRef.current = onHangUp;
@@ -66,6 +67,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         setLocalStream(null);
         setRemoteStream(null);
 
+        // Mark call as ended in Firestore
+        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
+        await setDoc(roomDocRef, { ended: true }, { merge: true });
+
         // Optionally clean up Firestore document, though might be good to keep for logs
         // Be careful with this, as the other user might still be connected.
         // A better approach is a "leave" signal rather than deleting the doc.
@@ -74,7 +79,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             onHangUpRef.current();
         }
 
-    }, [localStream, remoteStream]);
+    }, [localStream, remoteStream, roomId]);
 
 
     // 1. Effect for acquiring local media
@@ -257,6 +262,21 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         };
     }, [roomId, isAdmin]);
 
+    // Real-time call end detection
+    useEffect(() => {
+        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
+        const unsub = onSnapshot(roomDocRef, (snap) => {
+            const data = snap.data();
+            if (data && data.ended) {
+                setCallEnded(true);
+                setTimeout(() => {
+                  if (onHangUpRef.current) onHangUpRef.current();
+                }, 1000);
+            }
+        });
+        return () => { if (unsub) unsub(); };
+    }, [roomId]);
+
     const toggleMute = () => {
         if (localStream) {
             localStream.getAudioTracks().forEach(track => {
@@ -343,6 +363,15 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                   <span>الحالة: </span>
                   <span>{participants.admin ? 'المضيف متصل' : 'المضيف غير متصل'} | {participants.guest ? 'الضيف متصل' : 'الضيف غير متصل'}</span>
                 </div>
+            </div>
+        );
+    }
+
+    if (callEnded) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full py-12">
+                <div className="text-lg font-semibold mb-2">انتهت المكالمة</div>
+                <div className="text-muted-foreground">لقد غادر أحد الأطراف استشارة الفيديو.</div>
             </div>
         );
     }
