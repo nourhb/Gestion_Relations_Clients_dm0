@@ -529,7 +529,16 @@ function AdminRequestsPageContent() {
                                 type="button"
                                 variant="outline"
                                 size="icon"
-                                onClick={() => handleGenerateMeetingLink(editingRequest)}
+                                onClick={async () => {
+                                  if (!editingRequest.meetingUrl) {
+                                    await handleGenerateMeetingLink(editingRequest);
+                                  }
+                                  if (editingRequest.meetingUrl || (editingRequest.id && editingRequest.userId)) {
+                                    // Use the latest value after possible update
+                                    const roomId = editingRequest.meetingUrl || editingRequest.id;
+                                    router.push(`/meeting?roomId=${roomId}`);
+                                  }
+                                }}
                                 disabled={isGeneratingLink === editingRequest.id || isPending}
                             >
                                 {isGeneratingLink === editingRequest.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
