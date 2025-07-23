@@ -11,6 +11,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import VideoCall from '@/components/meeting/VideoCall'; 
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+const ADMIN_UID = "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 
 const generateAnonymousId = () => {
     return 'user_meeting_' + Math.random().toString(36).substring(2, 15);
@@ -20,6 +22,7 @@ function MeetingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -83,6 +86,11 @@ function MeetingPageContent() {
     );
   }
 
+  let videoCallUserId = anonymousId;
+  if (user && user.uid === ADMIN_UID) {
+    videoCallUserId = ADMIN_UID;
+  }
+
   return (
     <div className="space-y-6 p-4 md:p-6 container mx-auto">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -111,7 +119,7 @@ function MeetingPageContent() {
           {anonymousId && currentRoomId ? (
             // Using a key here is CRITICAL. It tells React to create a new instance of VideoCall
             // whenever the roomId changes, ensuring a clean state for each call.
-            <VideoCall key={currentRoomId} userId={anonymousId} roomId={currentRoomId} onHangUp={handleLeaveCall} />
+            <VideoCall key={currentRoomId} userId={videoCallUserId} roomId={currentRoomId} onHangUp={handleLeaveCall} />
           ) : (
             <div className="space-y-3 max-w-md mx-auto">
               <div>
