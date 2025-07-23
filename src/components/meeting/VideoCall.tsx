@@ -43,6 +43,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
     const [waitingForHost, setWaitingForHost] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
+    const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
     const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 
     useEffect(() => {
@@ -230,6 +231,32 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         };
     }, [localStream, roomId, userId, toast, retryCount]);
 
+    // Track participants in Firestore
+    useEffect(() => {
+        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
+        let unsub: Unsubscribe | null = null;
+        let left = false;
+        const updatePresence = async (present: boolean) => {
+            const field = isAdmin ? 'admin' : 'guest';
+            await setDoc(roomDocRef, { participants: { [field]: present } }, { merge: true });
+        };
+        updatePresence(true);
+        unsub = onSnapshot(roomDocRef, (snap) => {
+            const data = snap.data();
+            if (data && data.participants) {
+                setParticipants({
+                    admin: !!data.participants.admin,
+                    guest: !!data.participants.guest
+                });
+            }
+        });
+        return () => {
+            left = true;
+            updatePresence(false);
+            if (unsub) unsub();
+        };
+    }, [roomId, isAdmin]);
+
     const toggleMute = () => {
         if (localStream) {
             localStream.getAudioTracks().forEach(track => {
@@ -312,6 +339,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
                 <div className="text-lg font-semibold mb-2">في انتظار المضيف لبدء الجلسة...</div>
                 <div className="text-muted-foreground">يرجى إبقاء هذه الصفحة مفتوحة. سيتم الانضمام تلقائيًا عند بدء الجلسة.</div>
+                <div className="mt-4 text-sm text-muted-foreground">
+                  <span>الحالة: </span>
+                  <span>{participants.admin ? 'المضيف متصل' : 'المضيف غير متصل'} | {participants.guest ? 'الضيف متصل' : 'الضيف غير متصل'}</span>
+                </div>
             </div>
         );
     }
@@ -322,13 +353,13 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 <div className="relative">
                     <video ref={localVideoRef} autoPlay playsInline muted className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100" />
                     <div className="absolute bottom-2 left-2 bg-black/50 text-white text-sm px-2 py-1 rounded">
-                        أنت
+                        أنت ({isAdmin ? 'المضيف' : 'الضيف'})
                     </div>
                 </div>
                 <div className="relative">
                     <video ref={remoteVideoRef} autoPlay playsInline className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100" />
                     <div className="absolute bottom-2 left-2 bg-black/50 text-white text-sm px-2 py-1 rounded">
-                        مستخدم آخر
+                        {isAdmin ? 'الضيف' : 'المضيف'} {isAdmin ? (participants.guest ? '(متصل)' : '(غير متصل)') : (participants.admin ? '(متصل)' : '(غير متصل)')}
                     </div>
                 </div>
             </div>
