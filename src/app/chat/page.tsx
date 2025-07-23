@@ -22,6 +22,7 @@ import { Send, UserCircle, Loader2, Image as ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import Image from 'next/image';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 const ADMIN_UID = "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 const ADMIN_DISPLAY_NAME = "DigitalMen0 دعم"; 
@@ -57,6 +58,8 @@ function ChatPageContent() {
   const [chatId, setChatId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [anonymousId, setAnonymousId] = React.useState<string | null>(null);
+  const [popupMessage, setPopupMessage] = React.useState<Message | null>(null);
+  const [popupReply, setPopupReply] = React.useState("");
 
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -72,8 +75,18 @@ function ChatPageContent() {
   }, []);
 
   const playNotificationSound = () => {
-    if (audioRef.current) {
-      audioRef.current.play().catch(e => console.error("Error playing sound:", e));
+    try {
+      if (audioRef.current && document.body.contains(audioRef.current)) {
+        audioRef.current.play().catch(e => {
+          if (!e.message?.includes("media was removed from the document")) {
+            console.error("Error playing sound:", e);
+          }
+        });
+      }
+    } catch (e) {
+      if (!e.message?.includes("media was removed from the document")) {
+        console.error("Error playing sound:", e);
+      }
     }
   };
 
@@ -87,6 +100,8 @@ function ChatPageContent() {
             icon: "/logo.png",
         });
       }
+      setPopupMessage(message);
+      setPopupReply("");
   };
 
 
@@ -274,6 +289,46 @@ function ChatPageContent() {
   return (
     <>
       <audio ref={audioRef} src="/notification.mp3" preload="auto"></audio>
+      <Dialog open={!!popupMessage} onOpenChange={(open) => { if (!open) setPopupMessage(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>رسالة جديدة</DialogTitle>
+          </DialogHeader>
+          <div className="mb-4">
+            <div className="font-bold mb-2">{popupMessage?.senderName || "الدعم"}</div>
+            {popupMessage?.text && <div className="mb-2">{popupMessage.text}</div>}
+            {popupMessage?.imageUrl && <img src={popupMessage.imageUrl} alt="صورة" style={{maxWidth: '200px', borderRadius: '8px'}} />}
+          </div>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            if (!popupReply.trim() || !anonymousId || !chatId) return;
+            const senderId = anonymousId;
+            const senderName = `زائر ${anonymousId.substring(5, 11)}`;
+            const textToSend = popupReply;
+            setPopupReply("");
+            startTransition(async () => {
+              const result = await sendMessage(senderId, ADMIN_UID, senderName, textToSend, undefined);
+              if (!result.success) {
+                toast({ variant: "destructive", title: "لم يتم إرسال الرسالة", description: result.error || "تعذر إرسال رسالتك.", });
+                setPopupReply(textToSend);
+              } else {
+                setPopupMessage(null);
+              }
+            });
+          }}>
+            <Input
+              type="text"
+              placeholder="اكتب ردك هنا..."
+              value={popupReply}
+              onChange={(e) => setPopupReply(e.target.value)}
+              className="mb-2"
+            />
+            <DialogFooter>
+              <Button type="submit" disabled={!popupReply.trim()}>إرسال الرد</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <div className="container mx-auto px-2 py-6 md:px-4 md:py-8 flex flex-col h-[calc(100vh-10rem)] max-w-3xl">
         <Card className="flex flex-col flex-1 shadow-xl">
           <CardHeader className="border-b">
