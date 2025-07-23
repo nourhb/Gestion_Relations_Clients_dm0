@@ -491,6 +491,11 @@ function AdminRequestsPageContent() {
                                 {editingRequest.paymentProofInfo.fileName && (
                                     <span className="ml-2 text-xs text-muted-foreground">({editingRequest.paymentProofInfo.fileName})</span>
                                 )}
+                                {editingRequest.paymentProofInfo.fileType && editingRequest.paymentProofInfo.fileType.startsWith('image/') && (
+                                    <div className="mt-2">
+                                        <img src={editingRequest.paymentProofInfo.cloudinaryUrl} alt="إثبات الدفع" style={{maxWidth: '200px', maxHeight: '200px', borderRadius: '8px', border: '1px solid #eee'}} />
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
