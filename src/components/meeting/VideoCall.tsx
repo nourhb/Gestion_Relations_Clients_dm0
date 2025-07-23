@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, onSnapshot, setDoc, updateDoc, getDoc, addDoc, getDocs, writeBatch, deleteDoc, DocumentData, arrayUnion, Unsubscribe } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff } from 'lucide-react';
+import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface VideoCallProps {
@@ -41,6 +41,9 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [isVideoOff, setIsVideoOff] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
+    const [waitingForHost, setWaitingForHost] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+    const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 
     useEffect(() => {
         onHangUpRef.current = onHangUp;
@@ -119,46 +122,53 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             console.log("Waiting for local stream...");
             return;
         }
-
-        console.log("Local stream is ready, starting WebRTC setup for room:", roomId);
-        
-        const peerConnection = new RTCPeerConnection(servers);
-        pc.current = peerConnection;
-
-        // Add local tracks to the peer connection
-        localStream.getTracks().forEach(track => {
-            peerConnection.addTrack(track, localStream);
-        });
-        
-        // Setup remote stream
-        const remoteMediaStream = new MediaStream();
-        setRemoteStream(remoteMediaStream);
-        if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteMediaStream;
-        }
-
-        peerConnection.ontrack = (event) => {
-            event.streams[0].getTracks().forEach(track => {
-                remoteMediaStream.addTrack(track);
-            });
-        };
-
-        const callDocRef = doc(db, 'webrtc_sessions', roomId);
-        const offerCandidatesCol = collection(callDocRef, 'offerCandidates');
-        const answerCandidatesCol = collection(callDocRef, 'answerCandidates');
-        
-        let callUnsubscribe: Unsubscribe | null = null;
-        let offerCandidatesUnsubscribe: Unsubscribe | null = null;
-        let answerCandidatesUnsubscribe: Unsubscribe | null = null;
-        let queuedAnswerCandidates: RTCIceCandidateInit[] = [];
-        let queuedOfferCandidates: RTCIceCandidateInit[] = [];
-
-
+        let cancelled = false;
+        let retryTimeout: NodeJS.Timeout | null = null;
         const setupSignaling = async () => {
+            const callDocRef = doc(db, 'webrtc_sessions', roomId);
             const callDocSnap = await getDoc(callDocRef);
+            if (!callDocSnap.exists() && !isAdmin) {
+                setWaitingForHost(true);
+                retryTimeout = setTimeout(() => setRetryCount(c => c + 1), 3000);
+                return;
+            }
+            setWaitingForHost(false);
+
+            console.log("Local stream is ready, starting WebRTC setup for room:", roomId);
             
+            const peerConnection = new RTCPeerConnection(servers);
+            pc.current = peerConnection;
+
+            // Add local tracks to the peer connection
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+            
+            // Setup remote stream
+            const remoteMediaStream = new MediaStream();
+            setRemoteStream(remoteMediaStream);
+            if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = remoteMediaStream;
+            }
+
+            peerConnection.ontrack = (event) => {
+                event.streams[0].getTracks().forEach(track => {
+                    remoteMediaStream.addTrack(track);
+                });
+            };
+
+            const offerCandidatesCol = collection(callDocRef, 'offerCandidates');
+            const answerCandidatesCol = collection(callDocRef, 'answerCandidates');
+            
+            let callUnsubscribe: Unsubscribe | null = null;
+            let offerCandidatesUnsubscribe: Unsubscribe | null = null;
+            let answerCandidatesUnsubscribe: Unsubscribe | null = null;
+            let queuedAnswerCandidates: RTCIceCandidateInit[] = [];
+            let queuedOfferCandidates: RTCIceCandidateInit[] = [];
+
+
             if (!callDocSnap.exists()) {
-                // Caller logic
+                // Caller logic (admin)
                 peerConnection.onicecandidate = event => {
                     if (event.candidate) addDoc(offerCandidatesCol, event.candidate.toJSON());
                 };
@@ -192,7 +202,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 });
 
             } else {
-                // Callee logic
+                // Callee logic (guest)
                 peerConnection.onicecandidate = event => {
                     if (event.candidate) addDoc(answerCandidatesCol, event.candidate.toJSON());
                 };
@@ -214,24 +224,11 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 });
             }
         };
-
         setupSignaling();
-
         return () => {
-            console.log("Cleaning up WebRTC connection for room:", roomId);
-            if (callUnsubscribe) callUnsubscribe();
-            if (offerCandidatesUnsubscribe) offerCandidatesUnsubscribe();
-            if (answerCandidatesUnsubscribe) answerCandidatesUnsubscribe();
-            
-            if (peerConnection) {
-                peerConnection.getSenders().forEach(sender => sender.track?.stop());
-                peerConnection.getReceivers().forEach(receiver => receiver.track?.stop());
-                if(peerConnection.signalingState !== 'closed') peerConnection.close();
-            }
-             pc.current = null;
+            if (retryTimeout) clearTimeout(retryTimeout);
         };
-
-    }, [localStream, roomId, userId, toast]);
+    }, [localStream, roomId, userId, toast, retryCount]);
 
     const toggleMute = () => {
         if (localStream) {
@@ -309,6 +306,16 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         }
     };
     
+    if (waitingForHost) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full py-12">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <div className="text-lg font-semibold mb-2">في انتظار المضيف لبدء الجلسة...</div>
+                <div className="text-muted-foreground">يرجى إبقاء هذه الصفحة مفتوحة. سيتم الانضمام تلقائيًا عند بدء الجلسة.</div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col items-center space-y-4 w-full">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
