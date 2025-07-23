@@ -23,6 +23,10 @@ const servers = {
   iceCandidatePoolSize: 10,
 };
 
+function isMobileDevice() {
+  return /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
+}
+
 export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) {
     const { toast } = useToast();
     
@@ -46,6 +50,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
     const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
     const [callEnded, setCallEnded] = useState(false);
+    const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
 
     useEffect(() => {
         onHangUpRef.current = onHangUp;
@@ -386,7 +391,29 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     </div>
                 </div>
                 <div className="relative">
-                    <video ref={remoteVideoRef} autoPlay playsInline className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100" />
+                    <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        muted={false}
+                        className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100"
+                        onPlay={() => setRemoteAudioBlocked(false)}
+                        onPause={() => setRemoteAudioBlocked(true)}
+                    />
+                    {remoteAudioBlocked && (
+                        <div
+                            className="absolute inset-0 flex items-center justify-center bg-black/60 text-white cursor-pointer z-10"
+                            onClick={() => {
+                                if (remoteVideoRef.current) {
+                                    remoteVideoRef.current.muted = false;
+                                    remoteVideoRef.current.play();
+                                    setRemoteAudioBlocked(false);
+                                }
+                            }}
+                        >
+                            اضغط لتفعيل الصوت
+                        </div>
+                    )}
                     <div className="absolute bottom-2 left-2 bg-black/50 text-white text-sm px-2 py-1 rounded">
                         {isAdmin ? 'الضيف' : 'المضيف'} {isAdmin ? (participants.guest ? '(متصل)' : '(غير متصل)') : (participants.admin ? '(متصل)' : '(غير متصل)')}
                     </div>
@@ -399,9 +426,22 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 <Button onClick={toggleVideo} variant={isVideoOff ? "destructive" : "secondary"} size="icon" className="rounded-full h-12 w-12" disabled={isScreenSharing}>
                     {isVideoOff ? <VideoOff /> : <VideoIcon />}
                 </Button>
-                <Button onClick={toggleScreenShare} variant={isScreenSharing ? "default" : "secondary"} size="icon" className="rounded-full h-12 w-12">
-                    {isScreenSharing ? <ScreenShareOff /> : <ScreenShare />}
-                </Button>
+                {isMobileDevice() ? (
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon"
+                        className="rounded-full h-12 w-12 opacity-50 cursor-not-allowed"
+                        onClick={() => toast({ title: "غير مدعوم", description: "مشاركة الشاشة غير مدعومة على الجوال." })}
+                        disabled
+                    >
+                        <ScreenShareOff />
+                    </Button>
+                ) : (
+                    <Button onClick={toggleScreenShare} variant={isScreenSharing ? "default" : "secondary"} size="icon" className="rounded-full h-12 w-12">
+                        {isScreenSharing ? <ScreenShareOff /> : <ScreenShare />}
+                    </Button>
+                )}
                 <Button onClick={hangUp} variant="destructive" size="icon" className="rounded-full h-16 w-16">
                     <PhoneOff />
                 </Button>
