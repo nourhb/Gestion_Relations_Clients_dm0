@@ -153,6 +153,7 @@ export async function getCombinedAvailability(
     const querySnapshot = await getDocs(q);
     querySnapshot.forEach((docSnap) => {
       const requestData = docSnap.data();
+      if (requestData.status === 'cancelled') return; // Only block non-cancelled
       if (requestData.selectedSlots && Array.isArray(requestData.selectedSlots)) {
         requestData.selectedSlots.forEach((slot: any) => { 
           if (typeof slot === 'object' && slot !== null && typeof slot.date === 'string' && typeof slot.time === 'string') {
