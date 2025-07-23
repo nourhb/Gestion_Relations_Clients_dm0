@@ -152,6 +152,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
             // Add local tracks to the peer connection
             localStream.getTracks().forEach(track => {
+                console.log('[WebRTC] Adding local track:', track.kind, track);
                 peerConnection.addTrack(track, localStream);
             });
             
@@ -163,9 +164,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             }
 
             peerConnection.ontrack = (event) => {
+                console.log('[WebRTC] ontrack event:', event);
                 event.streams[0].getTracks().forEach(track => {
+                    console.log('[WebRTC] Adding remote track:', track.kind, track);
                     remoteMediaStream.addTrack(track);
                 });
+                if (remoteVideoRef.current) {
+                    remoteVideoRef.current.srcObject = remoteMediaStream;
+                }
             };
 
             const offerCandidatesCol = collection(callDocRef, 'offerCandidates');
@@ -181,7 +187,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             if (!callDocSnap.exists()) {
                 // Caller logic (admin)
                 peerConnection.onicecandidate = event => {
-                    if (event.candidate) addDoc(offerCandidatesCol, event.candidate.toJSON());
+                    if (event.candidate) {
+                        console.log('[WebRTC] Sending ICE candidate:', event.candidate);
+                        addDoc(offerCandidatesCol, event.candidate.toJSON());
+                    }
                 };
 
                 const offerDescription = await peerConnection.createOffer();
@@ -203,6 +212,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     snapshot.docChanges().forEach(change => {
                         if (change.type === 'added') {
                             const candidate = change.doc.data();
+                            console.log('[WebRTC] Received answer ICE candidate:', candidate);
                             if(peerConnection.currentRemoteDescription) {
                                 peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                             } else {
@@ -215,7 +225,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             } else {
                 // Callee logic (guest)
                 peerConnection.onicecandidate = event => {
-                    if (event.candidate) addDoc(answerCandidatesCol, event.candidate.toJSON());
+                    if (event.candidate) {
+                        console.log('[WebRTC] Sending ICE candidate:', event.candidate);
+                        addDoc(answerCandidatesCol, event.candidate.toJSON());
+                    }
                 };
 
                 const offerDescription = callDocSnap.data().offer;
@@ -229,11 +242,19 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 offerCandidatesUnsubscribe = onSnapshot(offerCandidatesCol, snapshot => {
                     snapshot.docChanges().forEach(change => {
                         if (change.type === 'added') {
-                            peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+                            const candidate = change.doc.data();
+                            console.log('[WebRTC] Received offer ICE candidate:', candidate);
+                            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                         }
                     });
                 });
             }
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log('[WebRTC] ICE connection state:', peerConnection.iceConnectionState);
+            };
+            peerConnection.onconnectionstatechange = () => {
+                console.log('[WebRTC] Connection state:', peerConnection.connectionState);
+            };
         };
         setupSignaling();
         return () => {
