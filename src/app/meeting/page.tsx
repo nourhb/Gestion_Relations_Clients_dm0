@@ -1,7 +1,7 @@
-"use client";
 export const dynamic = "force-dynamic";
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ const generateAnonymousId = () => {
     return 'user_meeting_' + Math.random().toString(36).substring(2, 15);
 };
 
-export default function MeetingPage() {
+function MeetingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -138,5 +138,13 @@ export default function MeetingPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function MeetingPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <MeetingPageContent />
+    </Suspense>
   );
 }
