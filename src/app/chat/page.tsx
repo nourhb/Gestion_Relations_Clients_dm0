@@ -2,7 +2,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect, useRef, useTransition, useCallback } from "react";
+import React, { Suspense } from "react";
 import { db, storage, isFirebaseConfigured } from "@/lib/firebase"; 
 import {
   collection,
@@ -47,25 +47,25 @@ const generateAnonymousId = () => {
 };
 
 
-export default function ChatPage() {
+function ChatPageContent() {
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition();
-  const [isUploading, setIsUploading] = useState(false);
+  const [isPending, startTransition] = React.useTransition();
+  const [isUploading, setIsUploading] = React.useState(false);
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [chatId, setChatId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [anonymousId, setAnonymousId] = useState<string | null>(null);
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const [newMessage, setNewMessage] = React.useState("");
+  const [chatId, setChatId] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [anonymousId, setAnonymousId] = React.useState<string | null>(null);
 
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const initialLoadDone = useRef(false);
-  const originalTitle = useRef(typeof document !== 'undefined' ? document.title : 'Chat');
+  const scrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+  const initialLoadDone = React.useRef(false);
+  const originalTitle = React.useRef(typeof document !== 'undefined' ? document.title : 'Chat');
 
   // Request notification permission
-  useEffect(() => {
+  React.useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
         Notification.requestPermission();
     }
@@ -90,7 +90,7 @@ export default function ChatPage() {
   };
 
 
-  useEffect(() => {
+  React.useEffect(() => {
     let currentId = localStorage.getItem('anonymousChatId');
     if (!currentId) {
       currentId = generateAnonymousId();
@@ -101,14 +101,14 @@ export default function ChatPage() {
   }, []);
 
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (anonymousId) {
       const currentChatId = getChatId(anonymousId, ADMIN_UID);
       setChatId(currentChatId);
     }
   }, [anonymousId]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!chatId || !isFirebaseConfigured) {
       if (!isFirebaseConfigured) setIsLoading(false);
       return;
@@ -161,7 +161,7 @@ export default function ChatPage() {
   }, [chatId, toast, anonymousId, messages.length]);
 
   // Effect to reset page title when window is focused
-    useEffect(() => {
+    React.useEffect(() => {
         const handleFocus = () => {
             document.title = originalTitle.current;
         };
@@ -170,7 +170,7 @@ export default function ChatPage() {
     }, []);
 
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (scrollAreaRef.current) {
       const scrollElement = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if (scrollElement) {
@@ -385,5 +385,13 @@ export default function ChatPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ChatPageContent />
+    </Suspense>
   );
 }

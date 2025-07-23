@@ -2,6 +2,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+import React, { Suspense } from "react";
 import { useState, useEffect, useTransition, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
@@ -69,7 +70,7 @@ function getStatusBadgeVariant(status: string) {
   }
 }
 
-export default function AdminRequestsPage() {
+function AdminRequestsPageContent() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
@@ -517,5 +518,13 @@ export default function AdminRequestsPage() {
       )}
 
     </div>
+  );
+}
+
+export default function AdminRequestsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AdminRequestsPageContent />
+    </Suspense>
   );
 }

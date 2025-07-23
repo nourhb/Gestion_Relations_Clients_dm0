@@ -2,7 +2,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect, useRef, useTransition, useCallback } from "react";
+import React, { Suspense } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { db, storage } from "@/lib/firebase";
@@ -43,7 +43,7 @@ interface Message {
   timestamp: Timestamp | null;
 }
 
-export default function AdminChatPage() {
+function AdminChatPageContent() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
@@ -442,5 +442,13 @@ export default function AdminChatPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+export default function AdminChatPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AdminChatPageContent />
+    </Suspense>
   );
 }
