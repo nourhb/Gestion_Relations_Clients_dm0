@@ -89,7 +89,10 @@ function MeetingPageContent() {
   let videoCallUserId = anonymousId;
   if (user && user.uid === ADMIN_UID) {
     videoCallUserId = ADMIN_UID;
+  } else {
+    videoCallUserId = anonymousId;
   }
+  console.log("[MeetingPage] user:", user, "videoCallUserId:", videoCallUserId, "anonymousId:", anonymousId);
 
   return (
     <div className="space-y-6 p-4 md:p-6 container mx-auto">
