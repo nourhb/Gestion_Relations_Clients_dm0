@@ -57,8 +57,8 @@ function MeetingPageContent() {
     console.log("[MeetingPage] User requested to leave call.");
     toast({ title: "انتهت المكالمة", description: "لقد غادرت استشارة الفيديو." });
     setCurrentRoomId(null);
-    setManualRoomIdInput(''); 
-    router.replace('/meeting', { scroll: false }); 
+    setManualRoomIdInput('');
+    router.replace('/'); // Redirect to home page after leaving
   }, [router, toast]);
 
   useEffect(() => {
