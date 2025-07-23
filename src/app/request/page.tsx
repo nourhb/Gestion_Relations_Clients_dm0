@@ -2,10 +2,11 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+import React, { Suspense } from "react";
 import SubmissionForm from '@/components/forms/SubmissionForm';
 import { useSearchParams } from "next/navigation";
 
-export default function RequestPage() {
+function RequestPageContent() {
   const searchParams = useSearchParams();
   const serviceTypeParam = searchParams.get('service') as "coaching" | "consultation" | null;
 
@@ -21,5 +22,13 @@ export default function RequestPage() {
         <SubmissionForm key={`${serviceTypeParam || 'default'}`} initialServiceType={serviceTypeParam || undefined} />
       </section>
     </div>
+  );
+}
+
+export default function RequestPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <RequestPageContent />
+    </Suspense>
   );
 }
