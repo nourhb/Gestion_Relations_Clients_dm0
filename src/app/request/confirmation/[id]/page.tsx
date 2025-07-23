@@ -58,6 +58,11 @@ export default function ConfirmationPage() {
             <div>
               <span className="font-semibold">إثبات الدفع:</span><br />
               <a href={data.paymentProofInfo.cloudinaryUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">عرض الملف</a>
+              {data.paymentProofInfo.fileType && data.paymentProofInfo.fileType.startsWith('image/') && (
+                <div className="mt-2">
+                  <img src={data.paymentProofInfo.cloudinaryUrl} alt="إثبات الدفع" style={{maxWidth: '200px', maxHeight: '200px', borderRadius: '8px', border: '1px solid #eee'}} />
+                </div>
+              )}
             </div>
           )}
         </div>
