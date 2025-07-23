@@ -450,22 +450,50 @@ function AdminRequestsPageContent() {
                         <Label className="text-right">العميل</Label>
                         <div className="col-span-3">{editingRequest.userName} ({editingRequest.email})</div>
                     </div>
-                     <div className="grid grid-cols-4 items-center gap-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">اللقب</Label>
+                        <div className="col-span-3">{editingRequest.surname}</div>
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
                         <Label className="text-right">الهاتف</Label>
                         <div className="col-span-3">{editingRequest.phone}</div>
                     </div>
                     <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">نوع الخدمة</Label>
+                        <div className="col-span-3">{editingRequest.serviceType === 'consultation' ? 'استشارة' : 'تدريب'}</div>
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
                         <Label className="text-right">الاجتماع</Label>
                         <div className="col-span-3 capitalize flex items-center gap-2">
-                           {editingRequest.meetingType === 'online' ? <Laptop className="h-4 w-4" /> : <Building className="h-4 w-4" />}
-                           {editingRequest.meetingType  === 'online' ? 'أونلاين' : 'حضوري'}
+                            {editingRequest.meetingType === 'online' ? <Laptop className="h-4 w-4" /> : <Building className="h-4 w-4" />}
+                            {editingRequest.meetingType  === 'online' ? 'أونلاين' : 'حضوري'}
                         </div>
                     </div>
-                     <div className="grid grid-cols-4 items-center gap-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
                         <Label className="text-right">الاستفسار</Label>
                         <p className="col-span-3 text-sm text-foreground/80 bg-muted/50 p-2 rounded-md whitespace-pre-wrap max-h-24 overflow-y-auto">{editingRequest.problemDescription}</p>
                     </div>
-
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">المواعيد المختارة</Label>
+                        <div className="col-span-3">
+                            <ul className="list-disc pr-6">
+                                {editingRequest.selectedSlots && editingRequest.selectedSlots.map((slot, idx) => (
+                                    <li key={idx}>{slot.date} - {slot.time}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                    {editingRequest.paymentProofInfo?.cloudinaryUrl && (
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label className="text-right">إثبات الدفع</Label>
+                            <div className="col-span-3">
+                                <a href={editingRequest.paymentProofInfo.cloudinaryUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">عرض الملف</a>
+                                {editingRequest.paymentProofInfo.fileName && (
+                                    <span className="ml-2 text-xs text-muted-foreground">({editingRequest.paymentProofInfo.fileName})</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="status-select" className="text-right">الحالة</Label>
                         <Select
@@ -486,26 +514,26 @@ function AdminRequestsPageContent() {
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="meeting-url" className="text-right">غرفة الاجتماع</Label>
                         <div className="col-span-3 flex gap-2">
-                             <Input 
+                            <Input 
                                 id="meeting-url"
                                 value={editingRequest.meetingUrl || ''} 
                                 onChange={(e) => setEditingRequest(prev => prev ? {...prev, meetingUrl: e.target.value} : null)}
                                 placeholder="digitalmen0-webrtc-..."
-                             />
-                             <Button
+                            />
+                            <Button
                                 type="button"
                                 variant="outline"
                                 size="icon"
                                 onClick={() => handleGenerateMeetingLink(editingRequest)}
                                 disabled={isGeneratingLink === editingRequest.id || isPending}
-                             >
-                                 {isGeneratingLink === editingRequest.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
-                             </Button>
+                            >
+                                {isGeneratingLink === editingRequest.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+                            </Button>
                         </div>
                     </div>
                 </div>
                 <DialogFooter>
-                     <DialogClose asChild>
+                    <DialogClose asChild>
                         <Button variant="outline">إلغاء</Button>
                     </DialogClose>
                     <Button onClick={() => handleSave(editingRequest.id, editingRequest.status, editingRequest.meetingUrl || null)} disabled={isPending}>
