@@ -116,9 +116,10 @@ const toBase64 = (file: File): Promise<string> => new Promise((resolve, reject) 
 
 interface SubmissionFormProps {
   initialServiceType?: "coaching" | "consultation";
+  onSuccess?: (requestId: string) => void;
 }
 
-export default function SubmissionForm({ initialServiceType }: SubmissionFormProps) {
+export default function SubmissionForm({ initialServiceType, onSuccess }: SubmissionFormProps) {
   const { toast } = useToast();
   const [isTransitionPending, startTransition] = useTransition();
 
@@ -268,10 +269,9 @@ export default function SubmissionForm({ initialServiceType }: SubmissionFormPro
         const result = await submitRequest(dataToSend);
 
         if (result.success && result.requestId) {
-          toast({
-            title: "تم إرسال طلبك بنجاح!",
-            description: `شكراً لك. سنتواصل معك قريباً بخصوص طلبك رقم: ${result.requestId.substring(0, 8).toUpperCase()}`,
-          });
+          if (onSuccess) {
+            onSuccess(result.requestId);
+          }
           form.reset(defaultValues);
           setSelectedFileName("");
           setSelectedDay(undefined);

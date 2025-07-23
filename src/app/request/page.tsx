@@ -5,9 +5,11 @@ export const dynamic = "force-dynamic";
 import React, { Suspense } from "react";
 import SubmissionForm from '@/components/forms/SubmissionForm';
 import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 function RequestPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const serviceTypeParam = searchParams.get('service') as "coaching" | "consultation" | null;
 
   return (
@@ -19,7 +21,7 @@ function RequestPageContent() {
         </p>
       </section>
       <section className="max-w-2xl mx-auto">
-        <SubmissionForm key={`${serviceTypeParam || 'default'}`} initialServiceType={serviceTypeParam || undefined} />
+        <SubmissionForm key={`${serviceTypeParam || 'default'}`} initialServiceType={serviceTypeParam || undefined} onSuccess={(requestId) => router.push(`/request/confirmation/${requestId}`)} />
       </section>
     </div>
   );
