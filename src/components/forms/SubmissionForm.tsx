@@ -59,7 +59,10 @@ const formSchema = z.object({
     date: z.string(),
     time: z.string(),
   })).min(1, { message: "الرجاء اختيار موعد واحد على الأقل." }),
-  paymentProof: z.any().optional(),
+  paymentProof: z.any().refine(
+    (fileList) => fileList && fileList.length > 0,
+    { message: "إثبات الدفع مطلوب لجميع الخدمات." }
+  ),
 }).superRefine((data, ctx) => {
     if (data.selectedSlots.some(slot => isToday(new Date(slot.date)))) {
         ctx.addIssue({
@@ -74,13 +77,6 @@ const formSchema = z.object({
                 code: z.ZodIssueCode.custom,
                 message: "يجب اختيار موعد واحد فقط للاستشارة.",
                 path: ["selectedSlots"],
-            });
-        }
-        if (!data.paymentProof || data.paymentProof.length === 0) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "إثبات الدفع مطلوب لخدمة الاستشارة.",
-                path: ["paymentProof"],
             });
         }
     } else if (data.serviceType === "coaching") {
@@ -234,58 +230,51 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
 
   async function onSubmit(values: SubmissionFormValues) {
     startTransition(async () => {
-        const file = values.paymentProof?.[0];
-        let paymentProofPayload: { base64?: string; fileName?: string; fileType?: string; } = {};
+      const file = values.paymentProof?.[0];
+      let paymentProofPayload: { base64?: string; fileName?: string; fileType?: string; } = {};
+      if (!file) {
+        form.setError("paymentProof", { type: "manual", message: "إثبات الدفع مطلوب لجميع الخدمات." });
+        return;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        form.setError("paymentProof", { type: "manual", message: `الحد الأقصى لحجم الملف هو ${MAX_FILE_SIZE_MB} ميجا بايت.` });
+        return;
+      }
+      if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+        form.setError("paymentProof", { type: "manual", message: "صيغ الملفات المقبولة هي: .jpg, .jpeg, .png, .webp" });
+        return;
+      }
+      try {
+        paymentProofPayload = {
+          base64: await toBase64(file),
+          fileName: file.name,
+          fileType: file.type,
+        };
+      } catch (error) {
+        toast({ variant: "destructive", title: "خطأ في قراءة الملف", description: "لم نتمكن من معالجة الملف الذي تم تحميله." });
+        return;
+      }
+      const dataToSend = { ...values, paymentProof: paymentProofPayload };
+      const result = await submitRequest(dataToSend);
 
-        // Re-validating payment proof on submit, just in case.
-        if (values.serviceType === "consultation") {
-            if (!file) {
-                form.setError("paymentProof", { type: "manual", message: "إثبات الدفع مطلوب لخدمة الاستشارة." });
-                return;
-            }
-            if (file.size > MAX_FILE_SIZE_BYTES) {
-                form.setError("paymentProof", { type: "manual", message: `الحد الأقصى لحجم الملف هو ${MAX_FILE_SIZE_MB} ميجا بايت.` });
-                return;
-            }
-            if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-                form.setError("paymentProof", { type: "manual", message: "صيغ الملفات المقبولة هي: .jpg, .jpeg, .png, .webp" });
-                return;
-            }
-            
-            try {
-                paymentProofPayload = {
-                    base64: await toBase64(file),
-                    fileName: file.name,
-                    fileType: file.type,
-                };
-            } catch (error) {
-                toast({ variant: "destructive", title: "خطأ في قراءة الملف", description: "لم نتمكن من معالجة الملف الذي تم تحميله." });
-                return;
-            }
+      if (result.success && result.requestId) {
+        if (onSuccess) {
+          onSuccess(result.requestId);
         }
-        
-        const dataToSend = { ...values, paymentProof: paymentProofPayload };
-
-        const result = await submitRequest(dataToSend);
-
-        if (result.success && result.requestId) {
-          if (onSuccess) {
-            onSuccess(result.requestId);
-          }
-          form.reset(defaultValues);
-          setSelectedFileName("");
-          setSelectedDay(undefined);
-        } else {
-          toast({
-            variant: "destructive",
-            title: "فشل إرسال الطلب",
-            description: result.error || "حدث خطأ غير متوقع. حاول مرة أخرى.",
-          });
-        }
+        form.reset(defaultValues);
+        setSelectedFileName("");
+        setSelectedDay(undefined);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "فشل إرسال الطلب",
+          description: result.error || "حدث خطأ غير متوقع. حاول مرة أخرى.",
+        });
+      }
     });
   }
   
-  const paymentProofIsRequiredForSelectedType = watchedServiceType === "consultation";
+  const paymentProofIsRequired = true;
   const fileRef = form.register("paymentProof");
 
   return (
@@ -462,8 +451,7 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
             render={({ field }) => (
                 <FormItem>
                     <FormLabel>
-                        إثبات الدفع
-                        {paymentProofIsRequiredForSelectedType && <span className="text-destructive">*</span>}
+                        إثبات الدفع<span className="text-destructive">*</span>
                     </FormLabel>
                     <FormControl>
                         <Input 
@@ -480,10 +468,7 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
                     <FormDescription>
                         {selectedFileName 
                             ? `الملف المختار: ${selectedFileName}`
-                            : paymentProofIsRequiredForSelectedType 
-                                ? `مطلوب لخدمة الاستشارة. الحد الأقصى لحجم الملف ${MAX_FILE_SIZE_MB} ميجا بايت.` 
-                                : `إثبات الدفع غير مطلوب لخدمة التدريب.`
-                        }
+                            : `مطلوب لجميع الخدمات. الحد الأقصى لحجم الملف ${MAX_FILE_SIZE_MB} ميجا بايت.`}
                     </FormDescription>
                     <FormMessage />
                 </FormItem>

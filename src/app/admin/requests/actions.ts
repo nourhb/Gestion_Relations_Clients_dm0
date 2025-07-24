@@ -238,10 +238,10 @@ export async function seedServiceRequests(): Promise<{ success: boolean, error?:
         meetingType: user.meetingType,
         problemDescription: user.problem,
         selectedSlots: [{ date: format(appointmentDay, "yyyy-MM-dd"), time: appointmentTime }],
-        paymentProofInfo: user.service === 'consultation' ? {
+        paymentProofInfo: {
           cloudinaryUrl: 'https://placehold.co/600x400.png',
           fileName: 'fake_proof.png'
-        } : null,
+        },
         status: 'confirmed',
         createdAt: serverTimestamp(),
         userEmail: user.email,
