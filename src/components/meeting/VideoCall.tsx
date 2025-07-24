@@ -185,7 +185,12 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
                 const offerDescription = await peerConnection.createOffer();
                 await peerConnection.setLocalDescription(offerDescription);
-                await setDoc(callDocRef, { offer: { sdp: offerDescription.sdp, type: offerDescription.type } });
+                try {
+                    await setDoc(callDocRef, { offer: { sdp: offerDescription.sdp, type: offerDescription.type } });
+                    console.log('[WebRTC] Offer written to Firestore:', { sdp: offerDescription.sdp, type: offerDescription.type });
+                } catch (err) {
+                    console.error('[WebRTC] Error writing offer to Firestore:', err);
+                }
 
                 callUnsubscribe = onSnapshot(callDocRef, snapshot => {
                     const data = snapshot.data();
