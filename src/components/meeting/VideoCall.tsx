@@ -200,8 +200,12 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 callUnsubscribe = onSnapshot(callDocRef, snapshot => {
                     const data = snapshot.data();
                     if (!peerConnection.currentRemoteDescription && data?.answer) {
-                        const answerDescription = new RTCSessionDescription(data.answer);
-                        peerConnection.setRemoteDescription(answerDescription).then(() => {
+                        const answerDescription = data.answer;
+                        if (!answerDescription || !answerDescription.type || !answerDescription.sdp) {
+                            console.error("Invalid or missing answer in Firestore:", answerDescription);
+                            return;
+                        }
+                        peerConnection.setRemoteDescription(new RTCSessionDescription(answerDescription)).then(() => {
                             queuedAnswerCandidates.forEach(candidate => peerConnection.addIceCandidate(new RTCIceCandidate(candidate)));
                             queuedAnswerCandidates = [];
                         });
@@ -232,6 +236,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 };
 
                 const offerDescription = callDocSnap.data().offer;
+                if (!offerDescription || !offerDescription.type || !offerDescription.sdp) {
+                    console.error("Invalid or missing offer in Firestore:", offerDescription);
+                    return;
+                }
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
                 
                 const answerDescription = await peerConnection.createAnswer();
