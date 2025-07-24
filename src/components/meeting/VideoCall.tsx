@@ -29,6 +29,11 @@ function isMobileDevice() {
 
 export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) {
     const { toast } = useToast();
+    const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
+    console.log('[VideoCall] userId:', userId, 'isAdmin:', isAdmin);
+    if (userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1" && !isAdmin) {
+        console.warn('[VideoCall] Admin userId detected but isAdmin is false!');
+    }
     
     // Stable refs for connection objects and props
     const pc = useRef<RTCPeerConnection | null>(null);
@@ -48,7 +53,6 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [waitingForHost, setWaitingForHost] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
     const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
-    const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
     const [callEnded, setCallEnded] = useState(false);
     const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
 
