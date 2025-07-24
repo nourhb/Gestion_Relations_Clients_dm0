@@ -157,20 +157,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             });
             
             // Setup remote stream
-            const remoteMediaStream = new MediaStream();
-            setRemoteStream(remoteMediaStream);
-            if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = remoteMediaStream;
-            }
-
             peerConnection.ontrack = (event) => {
                 console.log('[WebRTC] ontrack event:', event);
-                event.streams[0].getTracks().forEach(track => {
-                    console.log('[WebRTC] Adding remote track:', track.kind, track);
-                    remoteMediaStream.addTrack(track);
-                });
                 if (remoteVideoRef.current) {
-                    remoteVideoRef.current.srcObject = remoteMediaStream;
+                    remoteVideoRef.current.srcObject = event.streams[0];
                 }
             };
 
