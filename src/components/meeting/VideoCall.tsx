@@ -227,7 +227,8 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
                 const offerDescription = callDocSnap.data().offer;
                 if (!offerDescription || !offerDescription.type || !offerDescription.sdp) {
-                    console.error("Invalid or missing offer in Firestore:", offerDescription);
+                    console.warn("Offer not ready, will retry in 2 seconds...");
+                    setTimeout(setupSignaling, 2000);
                     return;
                 }
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
