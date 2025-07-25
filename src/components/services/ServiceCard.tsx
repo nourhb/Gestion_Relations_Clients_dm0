@@ -28,7 +28,7 @@ export default function ServiceCard({ icon, title, description, imageSrc, imageA
           </div>
         </CardHeader>
         <CardContent className="p-0 flex-grow flex flex-col">
-          <div className="relative h-64 w-full">
+          <div className="relative h-[475px] w-full">
             <Image
               src={imageSrc}
               alt={imageAlt}
