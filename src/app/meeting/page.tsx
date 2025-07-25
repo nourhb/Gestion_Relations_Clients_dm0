@@ -29,6 +29,7 @@ function MeetingPageContent() {
   const [manualRoomIdInput, setManualRoomIdInput] = useState<string>('');
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [callEnded, setCallEnded] = useState(false);
 
   // Effect to manage anonymous user ID
   useEffect(() => {
@@ -61,6 +62,7 @@ function MeetingPageContent() {
     toast({ title: "انتهت المكالمة", description: "لقد غادرت استشارة الفيديو." });
     setCurrentRoomId(null);
     setManualRoomIdInput('');
+    setCallEnded(true); // <-- set call ended
     router.replace('/'); // Redirect to home page after leaving
   }, [router, toast]);
 
@@ -119,10 +121,10 @@ function MeetingPageContent() {
             </Alert>
           )}
 
-          {anonymousId && currentRoomId ? (
-            // Using a key here is CRITICAL. It tells React to create a new instance of VideoCall
-            // whenever the roomId changes, ensuring a clean state for each call.
+          {anonymousId && currentRoomId && !callEnded ? (
             <VideoCall key={currentRoomId} userId={videoCallUserId} roomId={currentRoomId} onHangUp={handleLeaveCall} />
+          ) : callEnded ? (
+            <div className="text-center text-lg font-semibold text-primary">انتهت المكالمة. شكراً لاستخدامكم خدمتنا.</div>
           ) : (
             <div className="space-y-3 max-w-md mx-auto">
               <div>

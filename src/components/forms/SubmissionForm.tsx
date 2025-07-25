@@ -279,8 +279,8 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
 
   return (
     <Form {...form}>
-      <form key={watchedServiceType} onSubmit={form.handleSubmit(onSubmit)} className="space-y-8 p-4 md:p-6 border rounded-lg shadow-sm bg-card">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <form key={watchedServiceType} onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-4 md:p-5 border rounded-lg shadow-sm bg-card">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField control={form.control} name="name" render={({ field }) => (
               <FormItem><FormLabel>الاسم الأول<span className="text-destructive">*</span></FormLabel><FormControl><Input placeholder="مثال: أحمد" {...field} /></FormControl><FormMessage /></FormItem>
             )}
@@ -300,7 +300,7 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
         </div>
 
         <FormField control={form.control} name="serviceType" render={({ field }) => (
-            <FormItem className="space-y-3"><FormLabel>نوع الخدمة المطلوبة<span className="text-destructive">*</span></FormLabel>
+            <FormItem className="space-y-2"><FormLabel>نوع الخدمة المطلوبة<span className="text-destructive">*</span></FormLabel>
               <FormControl>
                 <RadioGroup onValueChange={(value) => {
                     field.onChange(value);
@@ -312,7 +312,7 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
                     });
                     setSelectedFileName("");
                 }} 
-                value={field.value} className="flex flex-col space-y-1 md:flex-row md:space-y-0 md:space-x-4 rtl:md:space-x-reverse" dir="rtl">
+                value={field.value} className="flex flex-col space-y-1 md:flex-row md:space-y-0 md:space-x-3 rtl:md:space-x-reverse" dir="rtl">
                   <FormItem className="flex items-center space-x-2 rtl:space-x-reverse">
                     <FormControl><RadioGroupItem value="coaching" /></FormControl><FormLabel className="font-normal">التدريب الشخصي (Coaching)</FormLabel>
                   </FormItem>
@@ -326,9 +326,9 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
         />
         
         <FormField control={form.control} name="meetingType" render={({ field }) => (
-            <FormItem className="space-y-3"><FormLabel>طريقة الجلسة<span className="text-destructive">*</span></FormLabel>
+            <FormItem className="space-y-2"><FormLabel>طريقة الجلسة<span className="text-destructive">*</span></FormLabel>
               <FormControl>
-                <RadioGroup onValueChange={field.onChange} value={field.value} className="flex flex-col space-y-1 md:flex-row md:space-y-0 md:space-x-4 rtl:md:space-x-reverse" dir="rtl">
+                <RadioGroup onValueChange={field.onChange} value={field.value} className="flex flex-col space-y-1 md:flex-row md:space-y-0 md:space-x-3 rtl:md:space-x-reverse" dir="rtl">
                   <FormItem className="flex items-center space-x-2 rtl:space-x-reverse">
                     <FormControl><RadioGroupItem value="online" /></FormControl><FormLabel className="font-normal">أونلاين (Online)</FormLabel>
                   </FormItem>
@@ -338,8 +338,8 @@ export default function SubmissionForm({ initialServiceType, onSuccess }: Submis
                 </RadioGroup>
               </FormControl>
                {watchedMeetingType === 'in-person' && (
-                <div className="mt-2 p-3 bg-muted/50 rounded-lg border border-input space-y-3">
-                    <div className="flex items-start gap-3">
+                <div className="mt-2 p-3 bg-muted/50 rounded-lg border border-input space-y-2">
+                    <div className="flex items-start gap-2">
                          <MapPin className="h-5 w-5 text-primary mt-1 shrink-0" />
                          <div>
                             <p className="font-semibold text-foreground">العنوان:</p>

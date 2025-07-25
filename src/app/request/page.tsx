@@ -13,10 +13,10 @@ function RequestPageContent() {
   const serviceTypeParam = searchParams.get('service') as "coaching" | "consultation" | null;
 
   return (
-    <div className="container mx-auto px-4 py-12">
-      <section className="text-center mb-12">
-        <h1 className="text-4xl font-bold mb-3 text-primary">طلب خدمة</h1>
-        <p className="text-lg text-foreground/80 max-w-xl mx-auto">
+    <div className="container mx-auto px-4 py-8">
+      <section className="text-center mb-8">
+        <h1 className="text-3xl font-bold mb-3 text-primary">طلب خدمة</h1>
+        <p className="text-base text-foreground/80 max-w-xl mx-auto">
           الرجاء ملء النموذج التالي لطلب خدمة استشارة أو تدريب. سنراجع طلبك ونتواصل معك لتأكيد المواعيد.
         </p>
       </section>

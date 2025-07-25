@@ -279,9 +279,9 @@ function ChatPageContent() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)]">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="ml-3 rtl:mr-3 text-lg">جاري تهيئة المحادثة...</p>
+      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[calc(100vh-8rem)]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-3 rtl:mr-3 text-base">جاري تهيئة المحادثة...</p>
       </div>
     );
   }
@@ -329,11 +329,11 @@ function ChatPageContent() {
           </form>
         </DialogContent>
       </Dialog>
-      <div className="container mx-auto px-2 py-6 md:px-4 md:py-8 flex flex-col h-[calc(100vh-10rem)] max-w-3xl">
+      <div className="container mx-auto px-2 py-4 md:px-4 md:py-6 flex flex-col h-[calc(100vh-10rem)] max-w-3xl">
         <Card className="flex flex-col flex-1 shadow-xl">
-          <CardHeader className="border-b">
-            <CardTitle className="text-xl text-primary flex items-center">
-              <UserCircle className="mr-2 rtl:ml-2 rtl:mr-0 h-6 w-6" />
+          <CardHeader className="border-b py-4">
+            <CardTitle className="text-lg text-primary flex items-center">
+              <UserCircle className="mr-2 rtl:ml-2 rtl:mr-0 h-5 w-5" />
               محادثة مع {ADMIN_DISPLAY_NAME}
             </CardTitle>
           </CardHeader>
