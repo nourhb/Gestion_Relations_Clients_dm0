@@ -18,7 +18,7 @@ export default function ServiceCard({ icon, title, description, imageSrc, imageA
   return (
     <Link href={`/request?service=${serviceKey}`} className="block group">
       <Card className="overflow-hidden shadow-lg group-hover:shadow-xl transition-shadow duration-300 h-full flex flex-col">
-        <CardHeader className="flex flex-row items-start gap-3 p-3 bg-card">
+        <CardHeader className="flex flex-row items-start gap-3 p-5 bg-card">
           <div className="p-2 rounded-full bg-accent/10">
              {icon}
           </div>
@@ -28,7 +28,7 @@ export default function ServiceCard({ icon, title, description, imageSrc, imageA
           </div>
         </CardHeader>
         <CardContent className="p-0 flex-grow flex flex-col">
-          <div className="relative h-32 w-full">
+          <div className="relative h-48 w-full">
             <Image
               src={imageSrc}
               alt={imageAlt}
@@ -37,7 +37,7 @@ export default function ServiceCard({ icon, title, description, imageSrc, imageA
               data-ai-hint={dataAiHint}
             />
           </div>
-          <div className="p-3 flex-grow">
+          <div className="p-5 flex-grow">
             <p className="text-foreground/90 leading-relaxed text-sm">{description}</p>
           </div>
         </CardContent>
