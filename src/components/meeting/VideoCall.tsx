@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, onSnapshot, addDoc, collection } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, addDoc, collection, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, Share2, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -99,7 +99,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     });
 
     // Check if room exists
-    const roomDoc = await roomRef.get();
+    const roomDoc = await getDoc(roomRef);
     
     if (!roomDoc.exists()) {
       // Create room and offer
