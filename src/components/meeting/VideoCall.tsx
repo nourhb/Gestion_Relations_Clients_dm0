@@ -39,6 +39,17 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         await localVideoRef.current.play();
+        
+        // Add event listeners to prevent video from stopping
+        localVideoRef.current.onended = () => {
+          console.log('Local video ended, restarting...');
+          localVideoRef.current?.play().catch(console.error);
+        };
+        
+        localVideoRef.current.onpause = () => {
+          console.log('Local video paused, resuming...');
+          localVideoRef.current?.play().catch(console.error);
+        };
       }
       
       localStreamRef.current = stream;
@@ -78,6 +89,17 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         remoteVideoRef.current.play().then(() => {
           console.log('Remote video started playing');
           setStatus("Connected!");
+          
+          // Add event listeners to prevent remote video from stopping
+          remoteVideoRef.current!.onended = () => {
+            console.log('Remote video ended, restarting...');
+            remoteVideoRef.current?.play().catch(console.error);
+          };
+          
+          remoteVideoRef.current!.onpause = () => {
+            console.log('Remote video paused, resuming...');
+            remoteVideoRef.current?.play().catch(console.error);
+          };
         }).catch(err => {
           console.error('Failed to play remote video:', err);
         });
@@ -241,8 +263,22 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       }
     });
 
+    // Periodic check to ensure videos are playing
+    const videoCheckInterval = setInterval(() => {
+      if (localVideoRef.current && localVideoRef.current.paused) {
+        console.log('Local video is paused, restarting...');
+        localVideoRef.current.play().catch(console.error);
+      }
+      
+      if (remoteVideoRef.current && remoteVideoRef.current.paused && remoteVideoRef.current.srcObject) {
+        console.log('Remote video is paused, restarting...');
+        remoteVideoRef.current.play().catch(console.error);
+      }
+    }, 2000);
+
     return () => {
       unsubscribe();
+      clearInterval(videoCheckInterval);
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
       }
@@ -322,6 +358,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
             autoPlay 
             muted 
             playsInline 
+            loop
             className="w-full h-auto rounded-md bg-black aspect-video object-cover transform scale-x-[-1]" 
           />
         </div>
@@ -331,6 +368,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
             ref={remoteVideoRef} 
             autoPlay 
             playsInline 
+            loop
             className="w-full h-auto rounded-md bg-black aspect-video object-cover transform scale-x-[-1]" 
           />
         </div>
