@@ -19,13 +19,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
+  const remoteStreamSet = useRef(false);
+  const callStarted = useRef(false);
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Starting...");
   const [isHost, setIsHost] = useState(false);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
-  const [remoteStreamSet, setRemoteStreamSet] = useState(false);
   const { toast } = useToast();
 
   const roomRef = doc(db, 'simple_rooms', roomId);
@@ -117,13 +118,19 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       addDebugInfo("Remote stream received!");
       
       // Only set remote stream once
-      if (remoteStreamSet) {
+      if (remoteStreamSet.current) {
         addDebugInfo("Remote stream already set, skipping...");
         return;
       }
       
+      // Additional check: if remote video already has a stream, don't set it again
+      if (remoteVideoRef.current?.srcObject) {
+        addDebugInfo("Remote video already has srcObject, skipping...");
+        return;
+      }
+      
       if (remoteVideoRef.current && event.streams[0]) {
-        setRemoteStreamSet(true);
+        remoteStreamSet.current = true;
         remoteVideoRef.current.srcObject = event.streams[0];
         setStatus("Connected!");
         addDebugInfo("Remote video element set");
@@ -222,8 +229,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const startCall = async () => {
+    if (callStarted.current) {
+      addDebugInfo("Call already started, skipping...");
+      return;
+    }
+    
+    callStarted.current = true;
     setStatus("Getting camera and microphone...");
-    setRemoteStreamSet(false); // Reset flag for new call
+    remoteStreamSet.current = false; // Reset flag for new call
     const stream = await getLocalStream();
     if (!stream) return;
 
@@ -320,7 +333,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
 
     return () => {
       addDebugInfo("VideoCall component unmounting");
-      setRemoteStreamSet(false);
+      remoteStreamSet.current = false;
+      callStarted.current = false;
       unsubscribeRoom();
       unsubscribeCandidates();
       
