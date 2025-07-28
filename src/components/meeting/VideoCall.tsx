@@ -18,8 +18,19 @@ interface VideoCallProps {
 const servers = {
   iceServers: [
     {
-      urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'],
+      urls: [
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302'
+      ],
     },
+    {
+      urls: 'stun:stun.relay.metered.ca:80',
+    },
+    {
+      urls: 'stun:stun.stunprotocol.org:3478',
+    }
   ],
   iceCandidatePoolSize: 10,
 };
@@ -97,6 +108,12 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             console.log('[WebRTC] Local description:', pc.current.localDescription);
             console.log('[WebRTC] Remote description:', pc.current.remoteDescription);
         }
+        
+        // Test network connectivity
+        console.log('[WebRTC] Testing network connectivity...');
+        fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' })
+            .then(() => console.log('[WebRTC] Network connectivity: OK'))
+            .catch(() => console.warn('[WebRTC] Network connectivity: Issues detected'));
     }, []);
 
     const getLocalStream = useCallback(async () => {
@@ -408,15 +425,31 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     console.log('[WebRTC] ICE gathering state:', pc.current.iceGatheringState);
                 };
 
-                // Add connection timeout
+                // Add connection timeout with fallback strategies
+                let retryCount = 0;
+                const maxRetries = 3;
+                
                 const connectionTimeout = setTimeout(() => {
                     if (isComponentMounted && pc.current && pc.current.connectionState !== 'connected') {
-                        console.warn('[WebRTC] Connection timeout - forcing reconnection');
-                        setConnectionStatus("Connection timeout - retrying...");
+                        retryCount++;
+                        console.warn(`[WebRTC] Connection timeout - retry ${retryCount}/${maxRetries}`);
                         
-                        // Force reconnection by restarting ICE
-                        if (pc.current.restartIce) {
-                            pc.current.restartIce();
+                        if (retryCount <= maxRetries) {
+                            setConnectionStatus(`Connection timeout - retrying (${retryCount}/${maxRetries})...`);
+                            
+                            // Try different strategies
+                            if (pc.current.restartIce) {
+                                pc.current.restartIce();
+                            }
+                            
+                            // If still failing, try with different constraints
+                            if (retryCount === maxRetries) {
+                                console.warn('[WebRTC] All retries failed - trying with minimal constraints');
+                                setConnectionStatus("Trying minimal connection...");
+                            }
+                        } else {
+                            setConnectionStatus("Connection failed - check network settings");
+                            console.error('[WebRTC] All connection attempts failed');
                         }
                     }
                 }, 15000); // 15 second timeout
@@ -647,6 +680,30 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                             className="text-xs"
                         >
                             فحص الاتصال
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => {
+                                console.log('[WebRTC] Testing basic WebRTC functionality...');
+                                const testPC = new RTCPeerConnection(servers);
+                                testPC.createOffer()
+                                    .then(offer => {
+                                        console.log('[WebRTC] Basic WebRTC test: Offer created successfully');
+                                        return testPC.setLocalDescription(offer);
+                                    })
+                                    .then(() => {
+                                        console.log('[WebRTC] Basic WebRTC test: Local description set');
+                                        testPC.close();
+                                    })
+                                    .catch(error => {
+                                        console.error('[WebRTC] Basic WebRTC test failed:', error);
+                                        testPC.close();
+                                    });
+                            }}
+                            className="text-xs"
+                        >
+                            اختبار WebRTC
                         </Button>
                     </div>
                 )}
