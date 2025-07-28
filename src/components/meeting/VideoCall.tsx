@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, onSnapshot, addDoc, collection, getDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, addDoc, collection, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, Share2, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -23,25 +23,21 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Starting...");
-  const [isInitiator, setIsInitiator] = useState(false);
+  const [isHost, setIsHost] = useState(false);
   const { toast } = useToast();
 
-  const roomRef = doc(db, 'webrtc_rooms', roomId);
-  const offerCandidatesRef = collection(roomRef, 'offerCandidates');
-  const answerCandidatesRef = collection(roomRef, 'answerCandidates');
+  const roomRef = doc(db, 'simple_rooms', roomId);
 
   const configuration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   };
 
   const getLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720 },
+        video: true,
         audio: true
       });
       
@@ -75,7 +71,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
 
     // Handle remote stream
     peerConnection.current.ontrack = (event) => {
-      console.log('Remote stream received:', event.streams[0]);
+      console.log('Remote stream received');
       if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
         setStatus("Connected!");
@@ -85,10 +81,9 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     // Handle ICE candidates
     peerConnection.current.onicecandidate = async (event) => {
       if (event.candidate) {
-        const candidateCollection = isInitiator ? offerCandidatesRef : answerCandidatesRef;
-        await addDoc(candidateCollection, {
+        await addDoc(collection(roomRef, 'candidates'), {
           candidate: event.candidate.toJSON(),
-          timestamp: new Date().toISOString()
+          from: isHost ? 'host' : 'guest'
         });
       }
     };
@@ -98,12 +93,6 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (peerConnection.current) {
         console.log('Connection state:', peerConnection.current.connectionState);
         setStatus(`Connection: ${peerConnection.current.connectionState}`);
-      }
-    };
-
-    peerConnection.current.oniceconnectionstatechange = () => {
-      if (peerConnection.current) {
-        console.log('ICE connection state:', peerConnection.current.iceConnectionState);
       }
     };
   };
@@ -120,25 +109,23 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     const roomSnapshot = await getDoc(roomRef);
     
     if (!roomSnapshot.exists()) {
-      // Create new room (initiator)
-      setIsInitiator(true);
+      // Create new room (host)
+      setIsHost(true);
       setStatus("Creating call...");
       
       const offer = await peerConnection.current!.createOffer();
       await peerConnection.current!.setLocalDescription(offer);
       
       await setDoc(roomRef, {
-        offer: {
-          type: offer.type,
-          sdp: offer.sdp
-        },
+        offer: offer,
+        host: userId,
         created: new Date().toISOString()
       });
       
       setStatus("Waiting for someone to join...");
     } else {
-      // Join existing room (receiver)
-      setIsInitiator(false);
+      // Join existing room (guest)
+      setIsHost(false);
       setStatus("Joining call...");
       
       const offerData = roomSnapshot.data()?.offer;
@@ -149,10 +136,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         await peerConnection.current!.setLocalDescription(answer);
         
         await setDoc(roomRef, {
-          answer: {
-            type: answer.type,
-            sdp: answer.sdp
-          },
+          answer: answer,
+          guest: userId,
           joined: new Date().toISOString()
         }, { merge: true });
         
@@ -164,45 +149,36 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   useEffect(() => {
     startCall();
 
-    // Listen for answer (if initiator)
+    // Listen for answer (if host)
     const unsubscribeRoom = onSnapshot(roomRef, async (snapshot) => {
       if (!snapshot.exists() || !peerConnection.current) return;
       
       const data = snapshot.data();
       
-      if (isInitiator && data.answer && !peerConnection.current.remoteDescription) {
+      if (isHost && data.answer && !peerConnection.current.remoteDescription) {
         setStatus("Connecting...");
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       }
     });
 
     // Listen for ICE candidates
-    const unsubscribeOfferCandidates = onSnapshot(offerCandidatesRef, (snapshot) => {
-      if (!isInitiator) {
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added' && peerConnection.current?.remoteDescription) {
-            const candidateData = change.doc.data();
+    const unsubscribeCandidates = onSnapshot(collection(roomRef, 'candidates'), (snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added' && peerConnection.current?.remoteDescription) {
+          const candidateData = change.doc.data();
+          const from = candidateData.from;
+          
+          // Only add candidates from the other peer
+          if ((isHost && from === 'guest') || (!isHost && from === 'host')) {
             await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
           }
-        });
-      }
-    });
-
-    const unsubscribeAnswerCandidates = onSnapshot(answerCandidatesRef, (snapshot) => {
-      if (isInitiator) {
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added' && peerConnection.current?.remoteDescription) {
-            const candidateData = change.doc.data();
-            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
-          }
-        });
-      }
+        }
+      });
     });
 
     return () => {
       unsubscribeRoom();
-      unsubscribeOfferCandidates();
-      unsubscribeAnswerCandidates();
+      unsubscribeCandidates();
       
       if (peerConnection.current) {
         peerConnection.current.close();
@@ -211,7 +187,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         localStream.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [roomId, isInitiator]);
+  }, [roomId, isHost]);
 
   const handleToggleMute = () => {
     if (localStream.current) {
@@ -231,21 +207,13 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     }
   };
 
-  const handleHangUp = async () => {
+  const handleHangUp = () => {
     if (peerConnection.current) {
       peerConnection.current.close();
     }
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => track.stop());
     }
-    
-    // Clean up room
-    try {
-      await deleteDoc(roomRef);
-    } catch (error) {
-      console.error('Error cleaning up room:', error);
-    }
-    
     onHangUp();
   };
 
@@ -270,7 +238,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     <div className="space-y-4 p-4 border rounded-lg shadow-md bg-card">
       <div className="text-center">
         <p className="text-sm text-muted-foreground mb-2">
-          Room: {roomId} | {isInitiator ? 'Initiator' : 'Receiver'} | {status}
+          Room: {roomId} | {isHost ? 'Host' : 'Guest'} | {status}
           {status.includes('Starting') || status.includes('Getting') || status.includes('Setting') || status.includes('Creating') || status.includes('Joining') || status.includes('Waiting') || status.includes('Connecting') && <Loader2 className="inline h-4 w-4 animate-spin ml-2" />}
         </p>
       </div>
