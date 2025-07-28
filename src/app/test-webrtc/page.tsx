@@ -7,6 +7,21 @@ export default function TestWebRTC() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState("Click to test");
   const [logs, setLogs] = useState<string[]>([]);
+  const [browserInfo, setBrowserInfo] = useState({
+    userAgent: '',
+    webRTCSupport: false,
+    getUserMediaSupport: false,
+    rtcPeerConnectionSupport: false
+  });
+
+  useEffect(() => {
+    setBrowserInfo({
+      userAgent: navigator.userAgent,
+      webRTCSupport: !!navigator.mediaDevices,
+      getUserMediaSupport: !!navigator.mediaDevices?.getUserMedia,
+      rtcPeerConnectionSupport: typeof RTCPeerConnection !== 'undefined'
+    });
+  }, []);
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -118,10 +133,10 @@ export default function TestWebRTC() {
       
       <div className="mt-6 p-4 bg-blue-50 rounded">
         <h3 className="font-semibold mb-2">Browser Information:</h3>
-        <p><strong>User Agent:</strong> {navigator.userAgent}</p>
-        <p><strong>WebRTC Support:</strong> {navigator.mediaDevices ? '✅ Supported' : '❌ Not Supported'}</p>
-        <p><strong>getUserMedia Support:</strong> {navigator.mediaDevices?.getUserMedia ? '✅ Supported' : '❌ Not Supported'}</p>
-        <p><strong>RTCPeerConnection Support:</strong> {typeof RTCPeerConnection !== 'undefined' ? '✅ Supported' : '❌ Not Supported'}</p>
+        <p><strong>User Agent:</strong> {browserInfo.userAgent}</p>
+        <p><strong>WebRTC Support:</strong> {browserInfo.webRTCSupport ? '✅ Supported' : '❌ Not Supported'}</p>
+        <p><strong>getUserMedia Support:</strong> {browserInfo.getUserMediaSupport ? '✅ Supported' : '❌ Not Supported'}</p>
+        <p><strong>RTCPeerConnection Support:</strong> {browserInfo.rtcPeerConnectionSupport ? '✅ Supported' : '❌ Not Supported'}</p>
       </div>
     </div>
   );

@@ -122,6 +122,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const startCall = async () => {
+    console.log('=== STARTING CALL ===');
     setStatus("Getting media...");
     const stream = await getMediaStream();
     if (!stream) return;
@@ -130,40 +131,52 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     const pc = createPeerConnection();
 
     // Check if room exists
+    console.log('Checking if room exists...');
     const roomDoc = await getDoc(roomRef);
     
     if (!roomDoc.exists()) {
       // Create room as host
+      console.log('Creating room as host...');
       setIsHost(true);
       setStatus("Creating call...");
       
       const offer = await pc.createOffer();
+      console.log('Offer created:', offer);
       await pc.setLocalDescription(offer);
+      console.log('Local description set');
       
       await setDoc(roomRef, {
         offer: offer,
         host: userId,
         timestamp: Date.now()
       });
+      console.log('Room document created with offer');
       
       setStatus("Waiting for someone to join...");
     } else {
       // Join as guest
+      console.log('Joining room as guest...');
       setIsHost(false);
       setStatus("Joining call...");
       
       const data = roomDoc.data();
+      console.log('Room data:', data);
       if (data.offer) {
+        console.log('Setting remote description from offer...');
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        console.log('Remote description set');
         
         const answer = await pc.createAnswer();
+        console.log('Answer created:', answer);
         await pc.setLocalDescription(answer);
+        console.log('Local description set');
         
         await setDoc(roomRef, {
           answer: answer,
           guest: userId,
           timestamp: Date.now()
         }, { merge: true });
+        console.log('Answer sent to Firestore');
         
         setStatus("Joined call");
       }
@@ -178,40 +191,50 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (!snapshot.exists() || !peerConnectionRef.current) return;
       
       const data = snapshot.data();
+      console.log('=== ROOM UPDATE ===', data);
       
       // Handle answer (for host)
       if (isHost && data.answer && !peerConnectionRef.current.remoteDescription) {
+        console.log('Host: Received answer, setting remote description...');
         setStatus("Connecting...");
         try {
           await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          console.log('Host: Remote description set successfully');
         } catch (error) {
-          console.error('Failed to set remote description:', error);
+          console.error('Host: Failed to set remote description:', error);
         }
       }
       
       // Handle offer (for guest)
       if (!isHost && data.offer && !peerConnectionRef.current.remoteDescription) {
+        console.log('Guest: Received offer, setting remote description...');
         setStatus("Connecting...");
         try {
           await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+          console.log('Guest: Remote description set');
           
           const answer = await peerConnectionRef.current.createAnswer();
+          console.log('Guest: Answer created:', answer);
           await peerConnectionRef.current.setLocalDescription(answer);
+          console.log('Guest: Local description set');
           
           await setDoc(roomRef, {
             answer: answer,
             guest: userId,
             timestamp: Date.now()
           }, { merge: true });
+          console.log('Guest: Answer sent to Firestore');
         } catch (error) {
-          console.error('Failed to handle offer:', error);
+          console.error('Guest: Failed to handle offer:', error);
         }
       }
       
       // Handle ICE candidates
       if (data.iceCandidate && data.from !== userId && peerConnectionRef.current.remoteDescription) {
+        console.log('Adding ICE candidate:', data.iceCandidate);
         try {
           await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
+          console.log('ICE candidate added successfully');
         } catch (error) {
           console.error('Failed to add ICE candidate:', error);
         }
