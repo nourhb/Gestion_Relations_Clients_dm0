@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, doc, onSnapshot, setDoc, updateDoc, getDoc, addDoc, getDocs, writeBatch, deleteDoc, DocumentData, arrayUnion, Unsubscribe } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, updateDoc, getDoc, addDoc, deleteDoc, Unsubscribe } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -31,9 +31,6 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const { toast } = useToast();
     const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
     console.log('[VideoCall] userId:', userId, 'isAdmin:', isAdmin);
-    if (userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1" && !isAdmin) {
-        console.warn('[VideoCall] Admin userId detected but isAdmin is false!');
-    }
     
     // Stable refs for connection objects and props
     const pc = useRef<RTCPeerConnection | null>(null);
@@ -51,10 +48,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
     const [waitingForHost, setWaitingForHost] = useState(false);
-    const [retryCount, setRetryCount] = useState(0);
     const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
     const [callEnded, setCallEnded] = useState(false);
     const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<string>("Initializing...");
 
     useEffect(() => {
         onHangUpRef.current = onHangUp;
@@ -62,14 +59,18 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
     const hangUp = useCallback(async () => {
         console.log("Hanging up call");
+        
+        // Clean up WebRTC connection
         if (pc.current) {
             pc.current.getSenders().forEach(sender => sender.track?.stop());
             pc.current.getReceivers().forEach(receiver => receiver.track?.stop());
             if (pc.current.signalingState !== 'closed') {
                 pc.current.close();
             }
+            pc.current = null;
         }
         
+        // Stop all media tracks
         localStream?.getTracks().forEach(track => track.stop());
         remoteStream?.getTracks().forEach(track => track.stop());
 
@@ -80,16 +81,10 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         const roomDocRef = doc(db, 'webrtc_sessions', roomId);
         await setDoc(roomDocRef, { ended: true }, { merge: true });
 
-        // Optionally clean up Firestore document, though might be good to keep for logs
-        // Be careful with this, as the other user might still be connected.
-        // A better approach is a "leave" signal rather than deleting the doc.
-        
         if (onHangUpRef.current) {
             onHangUpRef.current();
         }
-
     }, [localStream, remoteStream, roomId]);
-
 
     // 1. Effect for acquiring local media
     useEffect(() => {
@@ -98,6 +93,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
         const getMedia = async () => {
             try {
+                setConnectionStatus("Requesting media access...");
                 stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 if(isComponentMounted) {
                     setLocalStream(stream);
@@ -105,12 +101,13 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                         localVideoRef.current.srcObject = stream;
                     }
                     cameraTrackRef.current = stream.getVideoTracks()[0] || null;
+                    setConnectionStatus("Local stream ready");
                 } else {
-                    // component unmounted before stream was ready
                     stream.getTracks().forEach(track => track.stop());
                 }
             } catch (error) {
                 console.error("Error accessing media devices.", error);
+                setConnectionStatus("Media access failed");
                 toast({
                     variant: 'destructive',
                     title: 'خطأ في الوسائط',
@@ -124,147 +121,206 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
         return () => {
             isComponentMounted = false;
-            // Cleanup media stream when component unmounts
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
         };
     }, [toast]);
 
-    // 2. Effect for WebRTC signaling, depends on localStream
+    // 2. Effect for WebRTC signaling
     useEffect(() => {
         if (!localStream) {
             console.log("Waiting for local stream...");
             return;
         }
-        let cancelled = false;
-        let retryTimeout: NodeJS.Timeout | null = null;
+
+        let isComponentMounted = true;
+        let roomUnsubscribe: Unsubscribe | null = null;
+        let offerCandidatesUnsubscribe: Unsubscribe | null = null;
+        let answerCandidatesUnsubscribe: Unsubscribe | null = null;
+
         const setupSignaling = async () => {
             const callDocRef = doc(db, 'webrtc_sessions', roomId);
             const callDocSnap = await getDoc(callDocRef);
             const offerDescription = callDocSnap.data()?.offer;
+
             if (isAdmin) {
-                // If the room doc exists but the offer is missing/invalid, delete the doc before creating the offer
+                // Admin logic: Create offer if missing or invalid
                 if (callDocSnap.exists() && (!offerDescription || !offerDescription.type || !offerDescription.sdp)) {
-                    console.warn('[WebRTC] Admin detected invalid or missing offer in existing room doc. Deleting doc to reset.');
+                    console.warn('[WebRTC] Admin detected invalid offer in existing room doc. Deleting doc to reset.');
                     await deleteDoc(callDocRef);
                 }
-                // Re-fetch the doc after possible deletion
+
+                // Re-fetch after possible deletion
                 const freshCallDocSnap = await getDoc(callDocRef);
                 const freshOfferDescription = freshCallDocSnap.data()?.offer;
+
                 if (!freshCallDocSnap.exists() || !freshOfferDescription || !freshOfferDescription.type || !freshOfferDescription.sdp) {
-                    // Caller logic (admin)
+                    // Create offer as admin
+                    setConnectionStatus("Creating offer...");
                     const peerConnection = new RTCPeerConnection(servers);
                     pc.current = peerConnection;
-                    peerConnection.onicecandidate = event => {
-                        if (event.candidate) {
-                            console.log('[WebRTC] Sending ICE candidate:', event.candidate);
-                            addDoc(collection(callDocRef, 'offerCandidates'), event.candidate.toJSON());
-                        }
-                    };
+
+                    // Add local tracks
                     localStream.getTracks().forEach(track => {
-                        console.log('[WebRTC] Adding local track:', track.kind, track);
+                        console.log('[WebRTC] Adding local track:', track.kind);
                         peerConnection.addTrack(track, localStream);
                     });
+
+                    // Handle remote stream
                     peerConnection.ontrack = (event) => {
-                        console.log('[WebRTC] ontrack event:', event);
+                        console.log('[WebRTC] Received remote track');
                         if (remoteVideoRef.current) {
                             remoteVideoRef.current.srcObject = event.streams[0];
                         }
+                        setRemoteStream(event.streams[0]);
                     };
+
+                    // Create and send offer
                     const offer = await peerConnection.createOffer();
                     await peerConnection.setLocalDescription(offer);
+                    
                     try {
-                        await setDoc(callDocRef, { offer: { sdp: offer.sdp, type: offer.type } }, { merge: true });
-                        console.log('[WebRTC] Offer written to Firestore:', { sdp: offer.sdp, type: offer.type });
+                        await setDoc(callDocRef, { 
+                            offer: { sdp: offer.sdp, type: offer.type },
+                            participants: { admin: true }
+                        }, { merge: true });
+                        setConnectionStatus("Offer created, waiting for answer...");
+                        console.log('[WebRTC] Offer created and sent');
                     } catch (err) {
-                        console.error('[WebRTC] Error writing offer to Firestore:', err);
+                        console.error('[WebRTC] Error creating offer:', err);
+                        setConnectionStatus("Failed to create offer");
                     }
+
                     // Listen for answer
-                    onSnapshot(callDocRef, snapshot => {
+                    roomUnsubscribe = onSnapshot(callDocRef, snapshot => {
+                        if (!isComponentMounted || !pc.current) return;
                         const data = snapshot.data();
-                        if (!peerConnection.currentRemoteDescription && data?.answer) {
-                            const answerDescription = data.answer;
-                            if (!answerDescription || !answerDescription.type || !answerDescription.sdp) {
-                                console.error("Invalid or missing answer in Firestore:", answerDescription);
-                                return;
-                            }
-                            peerConnection.setRemoteDescription(new RTCSessionDescription(answerDescription));
+                        if (data?.answer && !pc.current.remoteDescription) {
+                            const answerDesc = new RTCSessionDescription(data.answer);
+                            pc.current.setRemoteDescription(answerDesc);
+                            setConnectionStatus("Answer received, connecting...");
                         }
                     });
+
                     // Listen for answer ICE candidates
-                    onSnapshot(collection(callDocRef, 'answerCandidates'), snapshot => {
+                    answerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'answerCandidates'), snapshot => {
+                        if (!isComponentMounted || !pc.current) return;
                         snapshot.docChanges().forEach(change => {
                             if (change.type === 'added') {
-                                const candidate = change.doc.data();
-                                console.log('[WebRTC] Received answer ICE candidate:', candidate);
-                                peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                                const candidate = new RTCIceCandidate(change.doc.data());
+                                pc.current?.addIceCandidate(candidate);
                             }
                         });
                     });
+
                 } else {
-                    // If offer already exists and is valid, you may want to handle as needed (e.g., re-use or update)
-                    // Optionally, you could reset the room or notify the user
-                    console.log('[WebRTC] Valid offer already exists in Firestore.');
+                    console.log('[WebRTC] Valid offer already exists');
+                    setConnectionStatus("Valid offer exists");
                 }
             } else {
-                // Guest logic: wait for offer
+                // Guest logic: Wait for offer
                 if (!offerDescription || !offerDescription.type || !offerDescription.sdp) {
-                    console.warn("Offer not ready, will retry in 2 seconds...");
-                    setTimeout(setupSignaling, 2000);
+                    setWaitingForHost(true);
+                    setConnectionStatus("Waiting for host to create offer...");
                     return;
                 }
-                // Callee logic (guest)
+
+                setWaitingForHost(false);
+                setConnectionStatus("Processing offer...");
+
+                // Create peer connection as guest
                 const peerConnection = new RTCPeerConnection(servers);
                 pc.current = peerConnection;
-                peerConnection.onicecandidate = event => {
-                    if (event.candidate) {
-                        console.log('[WebRTC] Sending ICE candidate:', event.candidate);
-                        addDoc(collection(callDocRef, 'answerCandidates'), event.candidate.toJSON());
-                    }
-                };
+
+                // Add local tracks
                 localStream.getTracks().forEach(track => {
-                    console.log('[WebRTC] Adding local track:', track.kind, track);
+                    console.log('[WebRTC] Adding local track:', track.kind);
                     peerConnection.addTrack(track, localStream);
                 });
+
+                // Handle remote stream
                 peerConnection.ontrack = (event) => {
-                    console.log('[WebRTC] ontrack event:', event);
+                    console.log('[WebRTC] Received remote track');
                     if (remoteVideoRef.current) {
                         remoteVideoRef.current.srcObject = event.streams[0];
                     }
+                    setRemoteStream(event.streams[0]);
                 };
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                await updateDoc(callDocRef, { answer: { sdp: answer.sdp, type: answer.type } });
+
+                // Process offer and create answer
+                try {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    
+                    await updateDoc(callDocRef, { 
+                        answer: { sdp: answer.sdp, type: answer.type },
+                        participants: { guest: true }
+                    });
+                    
+                    setConnectionStatus("Answer sent, connecting...");
+                    console.log('[WebRTC] Answer created and sent');
+                } catch (error) {
+                    console.error('[WebRTC] Error processing offer:', error);
+                    setConnectionStatus("Failed to process offer");
+                }
+
                 // Listen for offer ICE candidates
-                onSnapshot(collection(callDocRef, 'offerCandidates'), snapshot => {
+                offerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'offerCandidates'), snapshot => {
+                    if (!isComponentMounted || !pc.current) return;
                     snapshot.docChanges().forEach(change => {
                         if (change.type === 'added') {
-                            const candidate = change.doc.data();
-                            console.log('[WebRTC] Received offer ICE candidate:', candidate);
-                            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                            const candidate = new RTCIceCandidate(change.doc.data());
+                            pc.current?.addIceCandidate(candidate);
                         }
                     });
                 });
             }
+
+            // Set up connection state monitoring
+            if (pc.current) {
+                pc.current.onconnectionstatechange = () => {
+                    if (!isComponentMounted || !pc.current) return;
+                    console.log('[WebRTC] Connection state:', pc.current.connectionState);
+                    setConnectionStatus(`Connection: ${pc.current.connectionState}`);
+                    
+                    if (pc.current.connectionState === 'connected') {
+                        setConnectionStatus("Connected");
+                    } else if (['disconnected', 'failed', 'closed'].includes(pc.current.connectionState)) {
+                        setConnectionStatus("Connection lost");
+                    }
+                };
+
+                pc.current.oniceconnectionstatechange = () => {
+                    if (!isComponentMounted || !pc.current) return;
+                    console.log('[WebRTC] ICE connection state:', pc.current.iceConnectionState);
+                };
+            }
         };
+
         setupSignaling();
+
         return () => {
-            if (retryTimeout) clearTimeout(retryTimeout);
+            isComponentMounted = false;
+            if (roomUnsubscribe) roomUnsubscribe();
+            if (offerCandidatesUnsubscribe) offerCandidatesUnsubscribe();
+            if (answerCandidatesUnsubscribe) answerCandidatesUnsubscribe();
         };
-    }, [localStream, roomId, userId, toast, retryCount]);
+    }, [localStream, roomId, isAdmin]);
 
     // Track participants in Firestore
     useEffect(() => {
         const roomDocRef = doc(db, 'webrtc_sessions', roomId);
         let unsub: Unsubscribe | null = null;
-        let left = false;
+        
         const updatePresence = async (present: boolean) => {
             const field = isAdmin ? 'admin' : 'guest';
             await setDoc(roomDocRef, { participants: { [field]: present } }, { merge: true });
         };
+        
         updatePresence(true);
+        
         unsub = onSnapshot(roomDocRef, (snap) => {
             const data = snap.data();
             if (data && data.participants) {
@@ -274,8 +330,8 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 });
             }
         });
+        
         return () => {
-            left = true;
             updatePresence(false);
             if (unsub) unsub();
         };
@@ -289,7 +345,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             if (data && data.ended) {
                 setCallEnded(true);
                 setTimeout(() => {
-                  if (onHangUpRef.current) onHangUpRef.current();
+                    if (onHangUpRef.current) onHangUpRef.current();
                 }, 1000);
             }
         });
@@ -308,7 +364,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const toggleVideo = () => {
         if (localStream) {
             localStream.getVideoTracks().forEach(track => {
-                if (track.label.includes('camera')) { // only toggle the camera track
+                if (track.label.includes('camera')) {
                     track.enabled = !track.enabled;
                     setIsVideoOff(!track.enabled);
                 }
@@ -346,8 +402,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
                 await videoSender.replaceTrack(screenTrack);
                 
-                // Update local video to show screen share
-                 if (localVideoRef.current) {
+                if (localVideoRef.current) {
                     localVideoRef.current.srcObject = new MediaStream([screenTrack]);
                 }
                 
@@ -356,12 +411,12 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 // When user clicks the browser's "Stop sharing" button
                 screenTrack.onended = () => {
                     if (videoSender && cameraTrackRef.current) {
-                         videoSender.replaceTrack(cameraTrackRef.current!).then(() => {
-                             if(localVideoRef.current) {
-                                 localVideoRef.current.srcObject = new MediaStream([cameraTrackRef.current!, ...localStream!.getAudioTracks()]);
-                             }
-                             setIsScreenSharing(false);
-                         });
+                        videoSender.replaceTrack(cameraTrackRef.current!).then(() => {
+                            if(localVideoRef.current) {
+                                localVideoRef.current.srcObject = new MediaStream([cameraTrackRef.current!, ...localStream!.getAudioTracks()]);
+                            }
+                            setIsScreenSharing(false);
+                        });
                     }
                 };
 
@@ -379,8 +434,8 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 <div className="text-lg font-semibold mb-2">في انتظار المضيف لبدء الجلسة...</div>
                 <div className="text-muted-foreground">يرجى إبقاء هذه الصفحة مفتوحة. سيتم الانضمام تلقائيًا عند بدء الجلسة.</div>
                 <div className="mt-4 text-sm text-muted-foreground">
-                  <span>الحالة: </span>
-                  <span>{participants.admin ? 'المضيف متصل' : 'المضيف غير متصل'} | {participants.guest ? 'الضيف متصل' : 'الضيف غير متصل'}</span>
+                    <span>الحالة: </span>
+                    <span>{participants.admin ? 'المضيف متصل' : 'المضيف غير متصل'} | {participants.guest ? 'الضيف متصل' : 'الضيف غير متصل'}</span>
                 </div>
             </div>
         );
@@ -397,6 +452,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
     return (
         <div className="flex flex-col items-center space-y-4 w-full">
+            <div className="text-sm text-center text-muted-foreground mb-2">
+                {connectionStatus.includes("Initializing") || connectionStatus.includes("Creating") || 
+                 connectionStatus.includes("Processing") || connectionStatus.includes("Waiting") ? (
+                    <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                {connectionStatus}
+            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                 <div className="relative">
                     <video ref={localVideoRef} autoPlay playsInline muted className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100" />

@@ -6,12 +6,13 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Video, LogIn, AlertCircle, RefreshCw } from "lucide-react";
+import { Video, LogIn, AlertCircle, RefreshCw, PhoneOff } from "lucide-react";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import VideoCall from '@/components/meeting/VideoCall'; 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+
 const ADMIN_UID = "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 
 const generateAnonymousId = () => {
@@ -30,10 +31,11 @@ function MeetingPageContent() {
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [callEnded, setCallEnded] = useState(false);
+  const [isInCall, setIsInCall] = useState(false);
 
   // Effect to manage anonymous user ID
   useEffect(() => {
-    if (typeof window === "undefined") return; // Only run in browser
+    if (typeof window === "undefined") return;
     let currentId = localStorage.getItem('anonymousMeetingId');
     if (!currentId) {
       currentId = generateAnonymousId();
@@ -51,33 +53,43 @@ function MeetingPageContent() {
     const trimmedRoomId = roomIdToJoin.trim();
     console.log(`[MeetingPage] Attempting to join call in room: ${trimmedRoomId}`);
     
-    // Update the URL without causing a full navigation that might remount everything
-    router.replace(`/meeting?roomId=${trimmedRoomId}`, { scroll: false });
     setCurrentRoomId(trimmedRoomId);
+    setIsInCall(true);
+    setCallEnded(false);
     setErrorMsg(null);
+    
+    // Update URL without causing full navigation
+    router.replace(`/meeting?roomId=${trimmedRoomId}`, { scroll: false });
   }, [router, toast]);
 
   const handleLeaveCall = useCallback(() => {
     console.log("[MeetingPage] User requested to leave call.");
     toast({ title: "انتهت المكالمة", description: "لقد غادرت استشارة الفيديو." });
+    
     setCurrentRoomId(null);
+    setIsInCall(false);
+    setCallEnded(true);
     setManualRoomIdInput('');
-    setCallEnded(true); // <-- set call ended
-    router.replace('/'); // Redirect to home page after leaving
+    
+    // Navigate away after a short delay to prevent immediate re-mounting
+    setTimeout(() => {
+      router.replace('/');
+    }, 1000);
   }, [router, toast]);
 
+  // Handle URL changes
   useEffect(() => {
-      if (isLoading) return;
-      if (typeof window === "undefined") return; // Only run in browser
-      const roomIdFromQuery = searchParams.get('roomId');
-      if (roomIdFromQuery && roomIdFromQuery !== currentRoomId) {
-          handleJoinCall(roomIdFromQuery);
-      } else if (!roomIdFromQuery && currentRoomId) {
-          // This case handles when the user manually removes roomId from URL
-          // or uses back button.
-          setCurrentRoomId(null);
-      }
-  }, [isLoading, searchParams, currentRoomId, handleJoinCall]); 
+    if (isLoading) return;
+    if (typeof window === "undefined") return;
+    
+    const roomIdFromQuery = searchParams.get('roomId');
+    if (roomIdFromQuery && roomIdFromQuery !== currentRoomId && !isInCall) {
+      handleJoinCall(roomIdFromQuery);
+    } else if (!roomIdFromQuery && currentRoomId && !isInCall) {
+      setCurrentRoomId(null);
+      setCallEnded(false);
+    }
+  }, [isLoading, searchParams, currentRoomId, isInCall, handleJoinCall]);
 
   if (isLoading) {
     return (
@@ -107,7 +119,10 @@ function MeetingPageContent() {
       
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center text-primary"><Video className="mr-2 h-5 w-5 rtl:ml-2 rtl:mr-0" /> واجهة الاتصال المرئي</CardTitle>
+          <CardTitle className="flex items-center text-primary">
+            <Video className="mr-2 h-5 w-5 rtl:ml-2 rtl:mr-0" /> 
+            واجهة الاتصال المرئي
+          </CardTitle>
           <CardDescription>
             {currentRoomId ? `أنت في الغرفة: ${currentRoomId}` : 'أدخل معرف الغرفة أو استخدم الرابط المرسل إليك للبدء.'}
           </CardDescription>
@@ -121,11 +136,29 @@ function MeetingPageContent() {
             </Alert>
           )}
 
-          {anonymousId && currentRoomId && !callEnded ? (
-            <VideoCall key={currentRoomId} userId={videoCallUserId} roomId={currentRoomId} onHangUp={handleLeaveCall} />
-          ) : callEnded ? (
-            <div className="text-center text-lg font-semibold text-primary">انتهت المكالمة. شكراً لاستخدامكم خدمتنا.</div>
-          ) : (
+          {callEnded && (
+            <div className="text-center py-8">
+              <PhoneOff className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">انتهت المكالمة</h3>
+              <p className="text-muted-foreground mb-4">شكراً لاستخدامكم خدمتنا.</p>
+              <Button onClick={() => {
+                setCallEnded(false);
+                setCurrentRoomId(null);
+                setManualRoomIdInput('');
+              }}>
+                بدء مكالمة جديدة
+              </Button>
+            </div>
+          )}
+
+          {anonymousId && currentRoomId && isInCall && !callEnded ? (
+            <VideoCall 
+              key={`${currentRoomId}-${Date.now()}`}
+              userId={videoCallUserId} 
+              roomId={currentRoomId} 
+              onHangUp={handleLeaveCall} 
+            />
+          ) : !callEnded ? (
             <div className="space-y-3 max-w-md mx-auto">
               <div>
                 <Label htmlFor="room-id-input">أدخل معرف الغرفة للبدء أو الانضمام</Label>
@@ -140,14 +173,14 @@ function MeetingPageContent() {
               </div>
               <Button
                 onClick={() => handleJoinCall(manualRoomIdInput)}
-                disabled={!manualRoomIdInput.trim() || !!currentRoomId}
+                disabled={!manualRoomIdInput.trim() || isInCall}
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               >
                 <LogIn className="ml-2 h-4 w-4 rtl:mr-2 rtl:ml-0" />
                 انضم / ابدأ الجلسة
               </Button>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
     </div>
