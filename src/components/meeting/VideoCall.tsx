@@ -223,6 +223,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                         setRemoteStream(event.streams[0]);
                     };
 
+                    // Collect ICE candidates
+                    peerConnection.onicecandidate = async (event) => {
+                        if (event.candidate) {
+                            console.log('[WebRTC] Sending ICE candidate');
+                            await addDoc(collection(callDocRef, 'offerCandidates'), event.candidate.toJSON());
+                        }
+                    };
+
                     // Create and send offer
                     const offer = await peerConnection.createOffer();
                     await peerConnection.setLocalDescription(offer);
@@ -244,6 +252,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                         if (!isComponentMounted || !pc.current) return;
                         const data = snapshot.data();
                         if (data?.answer && !pc.current.remoteDescription) {
+                            console.log('[WebRTC] Received answer');
                             const answerDesc = new RTCSessionDescription(data.answer);
                             pc.current.setRemoteDescription(answerDesc);
                             setConnectionStatus("Answer received, connecting...");
@@ -257,6 +266,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                             if (change.type === 'added') {
                                 const candidate = new RTCIceCandidate(change.doc.data());
                                 pc.current?.addIceCandidate(candidate);
+                                console.log('[WebRTC] Added answer ICE candidate');
                             }
                         });
                     });
@@ -295,6 +305,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     setRemoteStream(event.streams[0]);
                 };
 
+                // Collect ICE candidates
+                peerConnection.onicecandidate = async (event) => {
+                    if (event.candidate) {
+                        console.log('[WebRTC] Sending ICE candidate');
+                        await addDoc(collection(callDocRef, 'answerCandidates'), event.candidate.toJSON());
+                    }
+                };
+
                 // Process offer and create answer
                 try {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
@@ -320,6 +338,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                         if (change.type === 'added') {
                             const candidate = new RTCIceCandidate(change.doc.data());
                             pc.current?.addIceCandidate(candidate);
+                            console.log('[WebRTC] Added offer ICE candidate');
                         }
                     });
                 });
@@ -342,6 +361,16 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 pc.current.oniceconnectionstatechange = () => {
                     if (!isComponentMounted || !pc.current) return;
                     console.log('[WebRTC] ICE connection state:', pc.current.iceConnectionState);
+                    if (pc.current.iceConnectionState === 'connected') {
+                        setConnectionStatus("ICE Connected");
+                    } else if (['disconnected', 'failed', 'closed'].includes(pc.current.iceConnectionState)) {
+                        setConnectionStatus("ICE Connection lost");
+                    }
+                };
+
+                pc.current.onicegatheringstatechange = () => {
+                    if (!isComponentMounted || !pc.current) return;
+                    console.log('[WebRTC] ICE gathering state:', pc.current.iceGatheringState);
                 };
             }
         };
@@ -355,6 +384,25 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             if (answerCandidatesUnsubscribe) answerCandidatesUnsubscribe();
         };
     }, [localStream, roomId, isAdmin]);
+
+    // Cleanup effect for component unmounting
+    useEffect(() => {
+        return () => {
+            // Clean up when component unmounts
+            if (pc.current) {
+                pc.current.close();
+                pc.current = null;
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
+            if (remoteStream) {
+                remoteStream.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [localStream, remoteStream]);
 
     // Track participants in Firestore
     useEffect(() => {
