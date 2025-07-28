@@ -246,11 +246,16 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 roomUnsubscribe = onSnapshot(callDocRef, snapshot => {
                     if (!isComponentMounted || !pc.current) return;
                     const data = snapshot.data();
+                    console.log('[WebRTC] Room document updated:', data);
                     if (data?.answer && !pc.current.remoteDescription) {
-                        console.log('[WebRTC] Received answer');
+                        console.log('[WebRTC] Received answer:', data.answer);
                         const answerDesc = new RTCSessionDescription(data.answer);
                         pc.current.setRemoteDescription(answerDesc);
                         setConnectionStatus("Answer received, connecting...");
+                    } else if (data?.answer && pc.current.remoteDescription) {
+                        console.log('[WebRTC] Answer already processed');
+                    } else if (!data?.answer) {
+                        console.log('[WebRTC] No answer in room document yet');
                     }
                 });
 
@@ -275,6 +280,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
                 setWaitingForHost(false);
                 setConnectionStatus("Processing offer...");
+
+                // Add timeout for offer processing
+                const offerTimeout = setTimeout(() => {
+                    if (isComponentMounted) {
+                        console.warn('[WebRTC] Offer processing timeout - taking too long');
+                        setConnectionStatus("Offer processing timeout");
+                    }
+                }, 10000); // 10 second timeout
 
                 // Create peer connection as guest
                 const peerConnection = new RTCPeerConnection(servers);
@@ -309,10 +322,19 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
                 // Process offer and create answer
                 try {
+                    console.log('[WebRTC] Setting remote description with offer:', offerDescription);
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
+                    console.log('[WebRTC] Remote description set successfully');
                     
+                    console.log('[WebRTC] Creating answer...');
+                    const answer = await peerConnection.createAnswer();
+                    console.log('[WebRTC] Answer created:', answer);
+                    
+                    console.log('[WebRTC] Setting local description...');
+                    await peerConnection.setLocalDescription(answer);
+                    console.log('[WebRTC] Local description set successfully');
+                    
+                    console.log('[WebRTC] Sending answer to Firestore...');
                     await updateDoc(callDocRef, { 
                         answer: { sdp: answer.sdp, type: answer.type },
                         participants: { guest: true },
@@ -320,10 +342,17 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     });
                     
                     setConnectionStatus("Answer sent, connecting...");
-                    console.log('[WebRTC] Answer created and sent');
+                    console.log('[WebRTC] Answer created and sent successfully');
+                    clearTimeout(offerTimeout);
                 } catch (error) {
                     console.error('[WebRTC] Error processing offer:', error);
-                    setConnectionStatus("Failed to process offer");
+                    console.error('[WebRTC] Error details:', {
+                        message: error.message,
+                        name: error.name,
+                        stack: error.stack
+                    });
+                    setConnectionStatus(`Failed to process offer: ${error.message}`);
+                    clearTimeout(offerTimeout);
                 }
 
                 // Listen for offer ICE candidates
