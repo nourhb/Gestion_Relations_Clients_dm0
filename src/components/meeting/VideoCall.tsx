@@ -24,26 +24,38 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Initializing...");
   const [isHost, setIsHost] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const { toast } = useToast();
 
   const roomRef = doc(db, 'rooms', roomId);
 
+  const addLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logMessage = `${timestamp}: ${message}`;
+    console.log(logMessage);
+    setDebugLogs(prev => [...prev, logMessage]);
+  };
+
   const getMediaStream = async () => {
     try {
+      addLog("Requesting camera and microphone...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
       });
       
+      addLog(`Got stream with ${stream.getTracks().length} tracks`);
+      
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         await localVideoRef.current.play();
+        addLog("Local video playing");
       }
       
       localStreamRef.current = stream;
       return stream;
     } catch (error) {
-      console.error('Media access error:', error);
+      addLog(`Media error: ${error}`);
       toast({
         variant: "destructive",
         title: "Media Error",
@@ -54,9 +66,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const createPeerConnection = () => {
+    addLog("Creating peer connection...");
+    
     const pc = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
       ]
     });
 
@@ -64,19 +79,27 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!);
+        addLog(`Added ${track.kind} track`);
       });
     }
 
     // Handle remote stream
     pc.ontrack = (event) => {
-      console.log('Remote track received:', event.streams[0]);
+      addLog("Remote track received!");
+      
       if (remoteVideoRef.current && event.streams[0]) {
+        // Clear any existing stream
+        remoteVideoRef.current.srcObject = null;
+        
+        // Set new stream
         remoteVideoRef.current.srcObject = event.streams[0];
+        
+        // Play the video
         remoteVideoRef.current.play().then(() => {
-          console.log('Remote video started playing');
+          addLog("Remote video playing successfully");
           setStatus("Connected!");
         }).catch(err => {
-          console.error('Failed to play remote video:', err);
+          addLog(`Remote video play failed: ${err}`);
         });
       }
     };
@@ -84,18 +107,33 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        addLog("ICE candidate generated");
         setDoc(roomRef, {
           iceCandidate: event.candidate.toJSON(),
           from: userId,
           timestamp: Date.now()
-        }, { merge: true });
+        }, { merge: true }).catch(err => {
+          addLog(`Failed to save ICE candidate: ${err}`);
+        });
       }
     };
 
     // Connection state
     pc.onconnectionstatechange = () => {
-      console.log('Connection state:', pc.connectionState);
+      addLog(`Connection state: ${pc.connectionState}`);
       setStatus(`Connection: ${pc.connectionState}`);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      addLog(`ICE connection state: ${pc.iceConnectionState}`);
+    };
+
+    pc.onicegatheringstatechange = () => {
+      addLog(`ICE gathering state: ${pc.iceGatheringState}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      addLog(`Signaling state: ${pc.signalingState}`);
     };
 
     peerConnectionRef.current = pc;
@@ -103,7 +141,9 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const startCall = async () => {
+    addLog("Starting call...");
     setStatus("Getting media...");
+    
     const stream = await getMediaStream();
     if (!stream) return;
 
@@ -111,40 +151,48 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     const pc = createPeerConnection();
 
     // Check if room exists
+    addLog("Checking if room exists...");
     const roomDoc = await getDoc(roomRef);
     
     if (!roomDoc.exists()) {
       // Create room as host
       setIsHost(true);
       setStatus("Creating call...");
+      addLog("Creating room as host");
       
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      addLog("Offer created and set as local description");
       
       await setDoc(roomRef, {
         offer: offer,
         host: userId,
         timestamp: Date.now()
       });
+      addLog("Room document created with offer");
       
       setStatus("Waiting for someone to join...");
     } else {
       // Join as guest
       setIsHost(false);
       setStatus("Joining call...");
+      addLog("Joining room as guest");
       
       const data = roomDoc.data();
       if (data.offer) {
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        addLog("Remote description set from offer");
         
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        addLog("Answer created and set as local description");
         
         await setDoc(roomRef, {
           answer: answer,
           guest: userId,
           timestamp: Date.now()
         }, { merge: true });
+        addLog("Answer sent to Firestore");
         
         setStatus("Joined call");
       }
@@ -159,20 +207,24 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (!snapshot.exists() || !peerConnectionRef.current) return;
       
       const data = snapshot.data();
+      addLog(`Room updated: ${Object.keys(data).join(', ')}`);
       
       // Handle answer (for host)
       if (isHost && data.answer && !peerConnectionRef.current.remoteDescription) {
         setStatus("Connecting...");
+        addLog("Received answer, setting remote description");
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       }
       
       // Handle offer (for guest)
       if (!isHost && data.offer && !peerConnectionRef.current.remoteDescription) {
         setStatus("Connecting...");
+        addLog("Received offer, setting remote description");
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
         
         const answer = await peerConnectionRef.current.createAnswer();
         await peerConnectionRef.current.setLocalDescription(answer);
+        addLog("Answer created and sent");
         
         await setDoc(roomRef, {
           answer: answer,
@@ -183,11 +235,13 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       
       // Handle ICE candidates
       if (data.iceCandidate && data.from !== userId && peerConnectionRef.current.remoteDescription) {
+        addLog("Adding ICE candidate");
         await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
       }
     });
 
     return () => {
+      addLog("Component unmounting, cleaning up...");
       unsubscribe();
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
@@ -204,6 +258,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         track.enabled = !track.enabled;
       });
       setIsMuted(prev => !prev);
+      addLog(`Audio ${isMuted ? 'enabled' : 'disabled'}`);
     }
   };
 
@@ -213,10 +268,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         track.enabled = !track.enabled;
       });
       setIsVideoOff(prev => !prev);
+      addLog(`Video ${isVideoOff ? 'enabled' : 'disabled'}`);
     }
   };
 
   const handleHangUp = () => {
+    addLog("Hanging up...");
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
     }
@@ -271,6 +328,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
             className="w-full h-auto rounded-md bg-black aspect-video object-cover transform scale-x-[-1]" 
           />
         </div>
+      </div>
+
+      {/* Debug Logs */}
+      <div className="mt-4 p-3 bg-gray-100 rounded text-xs max-h-40 overflow-y-auto">
+        <h4 className="font-bold mb-2">Debug Logs:</h4>
+        {debugLogs.map((log, index) => (
+          <div key={index} className="text-gray-600 mb-1">{log}</div>
+        ))}
       </div>
 
       <div className="flex justify-center space-x-2 md:space-x-3 mt-4">
