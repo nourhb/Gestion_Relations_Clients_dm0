@@ -24,6 +24,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Starting...");
   const [isHost, setIsHost] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const { toast } = useToast();
 
   const roomRef = doc(db, 'simple_rooms', roomId);
@@ -34,22 +35,31 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     ]
   };
 
+  const addDebugInfo = (info: string) => {
+    console.log(info);
+    setDebugInfo(prev => [...prev, `${new Date().toLocaleTimeString()}: ${info}`]);
+  };
+
   const getLocalStream = async () => {
     try {
+      addDebugInfo("Requesting camera and microphone...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
       });
       
       localStream.current = stream;
+      addDebugInfo(`Got local stream with ${stream.getTracks().length} tracks`);
       
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        addDebugInfo("Local video element set");
       }
       
       return stream;
     } catch (error) {
       console.error('Failed to get user media:', error);
+      addDebugInfo(`Media error: ${error}`);
       toast({
         variant: "destructive",
         title: "Media Error",
@@ -60,39 +70,54 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const createPeerConnection = () => {
+    addDebugInfo("Creating peer connection...");
     peerConnection.current = new RTCPeerConnection(configuration);
 
     // Add local stream tracks
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => {
         peerConnection.current?.addTrack(track, localStream.current!);
+        addDebugInfo(`Added ${track.kind} track to peer connection`);
       });
     }
 
     // Handle remote stream
     peerConnection.current.ontrack = (event) => {
-      console.log('Remote stream received');
+      addDebugInfo("Remote stream received!");
       if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
         setStatus("Connected!");
+        addDebugInfo("Remote video element set");
       }
     };
 
     // Handle ICE candidates
     peerConnection.current.onicecandidate = async (event) => {
       if (event.candidate) {
-        await addDoc(collection(roomRef, 'candidates'), {
-          candidate: event.candidate.toJSON(),
-          from: isHost ? 'host' : 'guest'
-        });
+        addDebugInfo("ICE candidate generated");
+        try {
+          await addDoc(collection(roomRef, 'candidates'), {
+            candidate: event.candidate.toJSON(),
+            from: isHost ? 'host' : 'guest'
+          });
+          addDebugInfo("ICE candidate sent to Firestore");
+        } catch (error) {
+          addDebugInfo(`Failed to send ICE candidate: ${error}`);
+        }
       }
     };
 
     // Handle connection state
     peerConnection.current.onconnectionstatechange = () => {
       if (peerConnection.current) {
-        console.log('Connection state:', peerConnection.current.connectionState);
+        addDebugInfo(`Connection state: ${peerConnection.current.connectionState}`);
         setStatus(`Connection: ${peerConnection.current.connectionState}`);
+      }
+    };
+
+    peerConnection.current.oniceconnectionstatechange = () => {
+      if (peerConnection.current) {
+        addDebugInfo(`ICE connection state: ${peerConnection.current.iceConnectionState}`);
       }
     };
   };
@@ -106,47 +131,61 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     createPeerConnection();
 
     // Check if room exists
-    const roomSnapshot = await getDoc(roomRef);
-    
-    if (!roomSnapshot.exists()) {
-      // Create new room (host)
-      setIsHost(true);
-      setStatus("Creating call...");
+    try {
+      addDebugInfo("Checking if room exists...");
+      const roomSnapshot = await getDoc(roomRef);
       
-      const offer = await peerConnection.current!.createOffer();
-      await peerConnection.current!.setLocalDescription(offer);
-      
-      await setDoc(roomRef, {
-        offer: offer,
-        host: userId,
-        created: new Date().toISOString()
-      });
-      
-      setStatus("Waiting for someone to join...");
-    } else {
-      // Join existing room (guest)
-      setIsHost(false);
-      setStatus("Joining call...");
-      
-      const offerData = roomSnapshot.data()?.offer;
-      if (offerData) {
-        await peerConnection.current!.setRemoteDescription(new RTCSessionDescription(offerData));
+      if (!roomSnapshot.exists()) {
+        // Create new room (host)
+        setIsHost(true);
+        setStatus("Creating call...");
+        addDebugInfo("Room doesn't exist, creating as host");
         
-        const answer = await peerConnection.current!.createAnswer();
-        await peerConnection.current!.setLocalDescription(answer);
+        const offer = await peerConnection.current!.createOffer();
+        await peerConnection.current!.setLocalDescription(offer);
+        addDebugInfo("Offer created and set as local description");
         
         await setDoc(roomRef, {
-          answer: answer,
-          guest: userId,
-          joined: new Date().toISOString()
-        }, { merge: true });
+          offer: offer,
+          host: userId,
+          created: new Date().toISOString()
+        });
+        addDebugInfo("Room document created with offer");
         
-        setStatus("Joined call");
+        setStatus("Waiting for someone to join...");
+      } else {
+        // Join existing room (guest)
+        setIsHost(false);
+        setStatus("Joining call...");
+        addDebugInfo("Room exists, joining as guest");
+        
+        const offerData = roomSnapshot.data()?.offer;
+        if (offerData) {
+          await peerConnection.current!.setRemoteDescription(new RTCSessionDescription(offerData));
+          addDebugInfo("Remote description set from offer");
+          
+          const answer = await peerConnection.current!.createAnswer();
+          await peerConnection.current!.setLocalDescription(answer);
+          addDebugInfo("Answer created and set as local description");
+          
+          await setDoc(roomRef, {
+            answer: answer,
+            guest: userId,
+            joined: new Date().toISOString()
+          }, { merge: true });
+          addDebugInfo("Answer sent to Firestore");
+          
+          setStatus("Joined call");
+        }
       }
+    } catch (error) {
+      addDebugInfo(`Error in startCall: ${error}`);
+      setStatus("Error starting call");
     }
   };
 
   useEffect(() => {
+    addDebugInfo("VideoCall component mounted");
     startCall();
 
     // Listen for answer (if host)
@@ -154,9 +193,11 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (!snapshot.exists() || !peerConnection.current) return;
       
       const data = snapshot.data();
+      addDebugInfo(`Room document updated: ${Object.keys(data).join(', ')}`);
       
       if (isHost && data.answer && !peerConnection.current.remoteDescription) {
         setStatus("Connecting...");
+        addDebugInfo("Received answer, setting remote description");
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       }
     });
@@ -170,6 +211,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
           
           // Only add candidates from the other peer
           if ((isHost && from === 'guest') || (!isHost && from === 'host')) {
+            addDebugInfo(`Adding ICE candidate from ${from}`);
             await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
           }
         }
@@ -177,6 +219,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     });
 
     return () => {
+      addDebugInfo("VideoCall component unmounting");
       unsubscribeRoom();
       unsubscribeCandidates();
       
@@ -263,6 +306,14 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
             className="w-full h-auto rounded-md bg-black aspect-video object-cover transform scale-x-[-1]" 
           />
         </div>
+      </div>
+
+      {/* Debug Info */}
+      <div className="mt-4 p-2 bg-gray-100 rounded text-xs max-h-32 overflow-y-auto">
+        <h4 className="font-bold mb-1">Debug Info:</h4>
+        {debugInfo.map((info, index) => (
+          <div key={index} className="text-gray-600">{info}</div>
+        ))}
       </div>
 
       <div className="flex justify-center space-x-2 md:space-x-3 mt-4">
