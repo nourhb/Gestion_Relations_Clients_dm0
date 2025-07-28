@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, onSnapshot, setDoc, updateDoc, getDoc, addDoc, deleteDoc, Unsubscribe } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff, Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface VideoCallProps {
@@ -52,6 +53,7 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
     const [callEnded, setCallEnded] = useState(false);
     const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<string>("Initializing...");
+    const [mediaError, setMediaError] = useState<string | null>(null);
 
     useEffect(() => {
         onHangUpRef.current = onHangUp;
@@ -86,46 +88,90 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         }
     }, [localStream, remoteStream, roomId]);
 
+    const getLocalStream = useCallback(async () => {
+    try {
+      console.log('Requesting media permissions...');
+      
+      // First try with both audio and video
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 }
+        }
+      });
+      
+      console.log('Media access granted:', stream.getTracks().map(t => `${t.kind}: ${t.label}`));
+      setLocalStream(stream);
+      setMediaError(null);
+      
+    } catch (error: any) {
+      console.warn('Failed to get audio+video, trying audio only:', error.message);
+      
+      try {
+        // Fallback to audio only
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false
+        });
+        
+        console.log('Audio-only access granted');
+        setLocalStream(audioStream);
+        setMediaError('فيديو غير متاح، سيتم استخدام الصوت فقط');
+        
+      } catch (audioError: any) {
+        console.warn('Failed to get audio, trying video only:', audioError.message);
+        
+        try {
+          // Last resort: video only
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 }
+            }
+          });
+          
+          console.log('Video-only access granted');
+          setLocalStream(videoStream);
+          setMediaError('صوت غير متاح، سيتم استخدام الفيديو فقط');
+          
+        } catch (videoError: any) {
+          console.error('All media access failed:', videoError);
+          setMediaError('لا يمكن الوصول إلى الكاميرا أو الميكروفون. يرجى التحقق من الأذونات.');
+          
+          // Create a dummy stream to allow the call to continue
+          const dummyStream = new MediaStream();
+          setLocalStream(dummyStream);
+        }
+      }
+    }, []);
+
     // 1. Effect for acquiring local media
     useEffect(() => {
-        let stream: MediaStream;
-        let isComponentMounted = true;
+        if (localStream) return;
+        
+        setConnectionStatus("Requesting media access...");
+        getLocalStream().then(() => {
+            setConnectionStatus("Local stream ready");
+        }).catch((error) => {
+            console.error("Failed to get local stream:", error);
+            setConnectionStatus("Media access failed");
+        });
+    }, [localStream, getLocalStream]);
 
-        const getMedia = async () => {
-            try {
-                setConnectionStatus("Requesting media access...");
-                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                if(isComponentMounted) {
-                    setLocalStream(stream);
-                    if (localVideoRef.current) {
-                        localVideoRef.current.srcObject = stream;
-                    }
-                    cameraTrackRef.current = stream.getVideoTracks()[0] || null;
-                    setConnectionStatus("Local stream ready");
-                } else {
-                    stream.getTracks().forEach(track => track.stop());
-                }
-            } catch (error) {
-                console.error("Error accessing media devices.", error);
-                setConnectionStatus("Media access failed");
-                toast({
-                    variant: 'destructive',
-                    title: 'خطأ في الوسائط',
-                    description: 'تعذر الوصول إلى الكاميرا أو الميكروفون. يرجى التحقق من الأذونات.'
-                });
-                if (onHangUpRef.current) onHangUpRef.current();
+    // Effect to set up video elements when local stream is available
+    useEffect(() => {
+        if (localStream && localVideoRef.current) {
+            localVideoRef.current.srcObject = localStream;
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                cameraTrackRef.current = videoTrack;
             }
-        };
-
-        getMedia();
-
-        return () => {
-            isComponentMounted = false;
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-        };
-    }, [toast]);
+        }
+    }, [localStream]);
 
     // 2. Effect for WebRTC signaling
     useEffect(() => {
@@ -452,6 +498,14 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
 
     return (
         <div className="flex flex-col items-center space-y-4 w-full">
+            {mediaError && (
+                <Alert className="mb-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>تنبيه</AlertTitle>
+                    <AlertDescription>{mediaError}</AlertDescription>
+                </Alert>
+            )}
+            
             <div className="text-sm text-center text-muted-foreground mb-2">
                 {connectionStatus.includes("Initializing") || connectionStatus.includes("Creating") || 
                  connectionStatus.includes("Processing") || connectionStatus.includes("Waiting") ? (
