@@ -24,6 +24,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Initializing...");
   const [isHost, setIsHost] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   const { toast } = useToast();
 
   const roomRef = doc(db, 'rooms', roomId);
@@ -57,7 +58,8 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
       ]
     });
 
@@ -89,7 +91,9 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
           iceCandidate: event.candidate.toJSON(),
           from: userId,
           timestamp: Date.now()
-        }, { merge: true });
+        }, { merge: true }).catch(err => {
+          console.error('Failed to save ICE candidate:', err);
+        });
       }
     };
 
@@ -97,6 +101,20 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     pc.onconnectionstatechange = () => {
       console.log('Connection state:', pc.connectionState);
       setStatus(`Connection: ${pc.connectionState}`);
+      
+      if (pc.connectionState === 'failed') {
+        console.log('Connection failed, attempting retry...');
+        setTimeout(() => {
+          if (connectionAttempts < 3) {
+            setConnectionAttempts(prev => prev + 1);
+            startCall();
+          }
+        }, 2000);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState);
     };
 
     peerConnectionRef.current = pc;
@@ -164,27 +182,39 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       // Handle answer (for host)
       if (isHost && data.answer && !peerConnectionRef.current.remoteDescription) {
         setStatus("Connecting...");
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } catch (error) {
+          console.error('Failed to set remote description:', error);
+        }
       }
       
       // Handle offer (for guest)
       if (!isHost && data.offer && !peerConnectionRef.current.remoteDescription) {
         setStatus("Connecting...");
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-        
-        const answer = await peerConnectionRef.current.createAnswer();
-        await peerConnectionRef.current.setLocalDescription(answer);
-        
-        await setDoc(roomRef, {
-          answer: answer,
-          guest: userId,
-          timestamp: Date.now()
-        }, { merge: true });
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+          
+          const answer = await peerConnectionRef.current.createAnswer();
+          await peerConnectionRef.current.setLocalDescription(answer);
+          
+          await setDoc(roomRef, {
+            answer: answer,
+            guest: userId,
+            timestamp: Date.now()
+          }, { merge: true });
+        } catch (error) {
+          console.error('Failed to handle offer:', error);
+        }
       }
       
       // Handle ICE candidates
       if (data.iceCandidate && data.from !== userId && peerConnectionRef.current.remoteDescription) {
-        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
+        } catch (error) {
+          console.error('Failed to add ICE candidate:', error);
+        }
       }
     });
 
@@ -197,7 +227,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [roomId, isHost, userId]);
+  }, [roomId, isHost, userId, connectionAttempts]);
 
   const handleToggleMute = () => {
     if (localStreamRef.current) {
@@ -257,6 +287,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       <div className="text-center">
         <p className="text-sm text-muted-foreground mb-2">
           Room: {roomId} | {isHost ? 'Host' : 'Guest'} | {status}
+          {connectionAttempts > 0 && <span className="ml-2 text-orange-600">(Attempt {connectionAttempts + 1})</span>}
         </p>
       </div>
 
