@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import VideoCall from '@/components/meeting/VideoCall'; 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/contexts/auth-context';
+import { useAuth } from '@/context/AuthContext';
 
 export default function MeetingPage() {
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
