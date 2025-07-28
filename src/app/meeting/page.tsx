@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import VideoCall from '@/components/meeting/VideoCall';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 
-export default function MeetingPage() {
+function MeetingPageContent() {
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [manualRoomIdInput, setManualRoomIdInput] = useState<string>('');
@@ -128,5 +128,18 @@ export default function MeetingPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function MeetingPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="mr-2 h-8 w-8 animate-spin text-primary" />
+        <p>Loading meeting page...</p>
+      </div>
+    }>
+      <MeetingPageContent />
+    </Suspense>
   );
 }
