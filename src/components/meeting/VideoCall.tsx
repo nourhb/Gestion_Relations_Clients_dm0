@@ -54,6 +54,36 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         addDebugInfo("Local video element set");
+        
+        // Debug local video element state
+        const video = localVideoRef.current;
+        addDebugInfo(`Local video readyState: ${video.readyState}`);
+        addDebugInfo(`Local video paused: ${video.paused}`);
+        addDebugInfo(`Local video muted: ${video.muted}`);
+        
+        // Check if local video is actually playing
+        video.onloadedmetadata = () => {
+          addDebugInfo("Local video metadata loaded");
+        };
+        
+        video.oncanplay = () => {
+          addDebugInfo("Local video can play");
+        };
+        
+        video.onplay = () => {
+          addDebugInfo("Local video started playing");
+        };
+        
+        video.onerror = (e) => {
+          addDebugInfo(`Local video error: ${e}`);
+        };
+        
+        // Force play the local video
+        video.play().then(() => {
+          addDebugInfo("Local video play() successful");
+        }).catch(err => {
+          addDebugInfo(`Local video play() failed: ${err}`);
+        });
       }
       
       return stream;
@@ -88,6 +118,42 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         remoteVideoRef.current.srcObject = event.streams[0];
         setStatus("Connected!");
         addDebugInfo("Remote video element set");
+        
+        // Debug video element state
+        const video = remoteVideoRef.current;
+        addDebugInfo(`Remote video readyState: ${video.readyState}`);
+        addDebugInfo(`Remote video paused: ${video.paused}`);
+        addDebugInfo(`Remote video muted: ${video.muted}`);
+        addDebugInfo(`Remote video volume: ${video.volume}`);
+        
+        // Check if video is actually playing
+        video.onloadedmetadata = () => {
+          addDebugInfo("Remote video metadata loaded");
+        };
+        
+        video.oncanplay = () => {
+          addDebugInfo("Remote video can play");
+        };
+        
+        video.onplay = () => {
+          addDebugInfo("Remote video started playing");
+        };
+        
+        video.onerror = (e) => {
+          addDebugInfo(`Remote video error: ${e}`);
+        };
+        
+        // Force play the video
+        video.play().then(() => {
+          addDebugInfo("Remote video play() successful");
+        }).catch(err => {
+          addDebugInfo(`Remote video play() failed: ${err}`);
+        });
+        
+        // Debug stream tracks
+        event.streams[0].getTracks().forEach(track => {
+          addDebugInfo(`Remote ${track.kind} track enabled: ${track.enabled}, readyState: ${track.readyState}`);
+        });
       }
     };
 
@@ -112,12 +178,36 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       if (peerConnection.current) {
         addDebugInfo(`Connection state: ${peerConnection.current.connectionState}`);
         setStatus(`Connection: ${peerConnection.current.connectionState}`);
+        
+        if (peerConnection.current.connectionState === 'connected') {
+          addDebugInfo("🎉 WebRTC connection established successfully!");
+        } else if (peerConnection.current.connectionState === 'failed') {
+          addDebugInfo("❌ WebRTC connection failed");
+        }
       }
     };
 
     peerConnection.current.oniceconnectionstatechange = () => {
       if (peerConnection.current) {
         addDebugInfo(`ICE connection state: ${peerConnection.current.iceConnectionState}`);
+        
+        if (peerConnection.current.iceConnectionState === 'connected') {
+          addDebugInfo("🎉 ICE connection established!");
+        } else if (peerConnection.current.iceConnectionState === 'failed') {
+          addDebugInfo("❌ ICE connection failed");
+        }
+      }
+    };
+    
+    peerConnection.current.onicegatheringstatechange = () => {
+      if (peerConnection.current) {
+        addDebugInfo(`ICE gathering state: ${peerConnection.current.iceGatheringState}`);
+      }
+    };
+    
+    peerConnection.current.onsignalingstatechange = () => {
+      if (peerConnection.current) {
+        addDebugInfo(`Signaling state: ${peerConnection.current.signalingState}`);
       }
     };
   };
