@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db } from '@/lib/firebase';
-import { doc, setDoc, onSnapshot, addDoc, collection, getDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, addDoc, collection, getDoc, deleteDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, Share2, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -23,24 +23,25 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [status, setStatus] = useState("Starting...");
-  const [isCaller, setIsCaller] = useState(false);
+  const [isInitiator, setIsInitiator] = useState(false);
   const { toast } = useToast();
 
-  const roomDoc = doc(db, 'rooms', roomId);
-  const offerCandidates = collection(roomDoc, 'offerCandidates');
-  const answerCandidates = collection(roomDoc, 'answerCandidates');
+  const roomRef = doc(db, 'webrtc_rooms', roomId);
+  const offerCandidatesRef = collection(roomRef, 'offerCandidates');
+  const answerCandidatesRef = collection(roomRef, 'answerCandidates');
 
-  const rtcConfiguration = {
+  const configuration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   };
 
-  const initializeMedia = async () => {
+  const getLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: { width: 1280, height: 720 },
         audio: true
       });
       
@@ -63,70 +64,81 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   };
 
   const createPeerConnection = () => {
-    peerConnection.current = new RTCPeerConnection(rtcConfiguration);
+    peerConnection.current = new RTCPeerConnection(configuration);
 
-    // Add local stream tracks to peer connection
+    // Add local stream tracks
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => {
         peerConnection.current?.addTrack(track, localStream.current!);
       });
     }
 
-    // Handle incoming remote stream
+    // Handle remote stream
     peerConnection.current.ontrack = (event) => {
-      console.log('Remote stream received');
+      console.log('Remote stream received:', event.streams[0]);
       if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
+        setStatus("Connected!");
       }
     };
 
     // Handle ICE candidates
     peerConnection.current.onicecandidate = async (event) => {
       if (event.candidate) {
-        const candidateCollection = isCaller ? offerCandidates : answerCandidates;
-        await addDoc(candidateCollection, event.candidate.toJSON());
+        const candidateCollection = isInitiator ? offerCandidatesRef : answerCandidatesRef;
+        await addDoc(candidateCollection, {
+          candidate: event.candidate.toJSON(),
+          timestamp: new Date().toISOString()
+        });
       }
     };
 
-    // Handle connection state changes
+    // Handle connection state
     peerConnection.current.onconnectionstatechange = () => {
       if (peerConnection.current) {
         console.log('Connection state:', peerConnection.current.connectionState);
-        setStatus(`Connected: ${peerConnection.current.connectionState}`);
+        setStatus(`Connection: ${peerConnection.current.connectionState}`);
+      }
+    };
+
+    peerConnection.current.oniceconnectionstatechange = () => {
+      if (peerConnection.current) {
+        console.log('ICE connection state:', peerConnection.current.iceConnectionState);
       }
     };
   };
 
   const startCall = async () => {
     setStatus("Getting camera and microphone...");
-    const stream = await initializeMedia();
+    const stream = await getLocalStream();
     if (!stream) return;
 
     setStatus("Setting up connection...");
     createPeerConnection();
 
     // Check if room exists
-    const roomSnapshot = await getDoc(roomDoc);
+    const roomSnapshot = await getDoc(roomRef);
     
     if (!roomSnapshot.exists()) {
-      // Create new room (caller)
-      setIsCaller(true);
+      // Create new room (initiator)
+      setIsInitiator(true);
       setStatus("Creating call...");
       
       const offer = await peerConnection.current!.createOffer();
       await peerConnection.current!.setLocalDescription(offer);
       
-      await setDoc(roomDoc, {
+      await setDoc(roomRef, {
         offer: {
           type: offer.type,
           sdp: offer.sdp
-        }
+        },
+        created: new Date().toISOString()
       });
       
       setStatus("Waiting for someone to join...");
     } else {
-      // Join existing room (callee)
-      setIsCaller(false);
+      // Join existing room (receiver)
+      setIsInitiator(false);
       setStatus("Joining call...");
       
       const offerData = roomSnapshot.data()?.offer;
@@ -136,11 +148,12 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         const answer = await peerConnection.current!.createAnswer();
         await peerConnection.current!.setLocalDescription(answer);
         
-        await setDoc(roomDoc, {
+        await setDoc(roomRef, {
           answer: {
             type: answer.type,
             sdp: answer.sdp
-          }
+          },
+          joined: new Date().toISOString()
         }, { merge: true });
         
         setStatus("Joined call");
@@ -151,34 +164,36 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   useEffect(() => {
     startCall();
 
-    // Listen for answer (if caller)
-    const unsubscribeRoom = onSnapshot(roomDoc, async (snapshot) => {
+    // Listen for answer (if initiator)
+    const unsubscribeRoom = onSnapshot(roomRef, async (snapshot) => {
       if (!snapshot.exists() || !peerConnection.current) return;
       
       const data = snapshot.data();
       
-      if (isCaller && data.answer && !peerConnection.current.remoteDescription) {
+      if (isInitiator && data.answer && !peerConnection.current.remoteDescription) {
         setStatus("Connecting...");
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       }
     });
 
     // Listen for ICE candidates
-    const unsubscribeOfferCandidates = onSnapshot(offerCandidates, (snapshot) => {
-      if (!isCaller) {
+    const unsubscribeOfferCandidates = onSnapshot(offerCandidatesRef, (snapshot) => {
+      if (!isInitiator) {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type === 'added' && peerConnection.current?.remoteDescription) {
-            await peerConnection.current.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            const candidateData = change.doc.data();
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
           }
         });
       }
     });
 
-    const unsubscribeAnswerCandidates = onSnapshot(answerCandidates, (snapshot) => {
-      if (isCaller) {
+    const unsubscribeAnswerCandidates = onSnapshot(answerCandidatesRef, (snapshot) => {
+      if (isInitiator) {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type === 'added' && peerConnection.current?.remoteDescription) {
-            await peerConnection.current.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            const candidateData = change.doc.data();
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
           }
         });
       }
@@ -196,7 +211,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
         localStream.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [roomId, isCaller]);
+  }, [roomId, isInitiator]);
 
   const handleToggleMute = () => {
     if (localStream.current) {
@@ -216,13 +231,21 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     }
   };
 
-  const handleHangUp = () => {
+  const handleHangUp = async () => {
     if (peerConnection.current) {
       peerConnection.current.close();
     }
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => track.stop());
     }
+    
+    // Clean up room
+    try {
+      await deleteDoc(roomRef);
+    } catch (error) {
+      console.error('Error cleaning up room:', error);
+    }
+    
     onHangUp();
   };
 
@@ -247,7 +270,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     <div className="space-y-4 p-4 border rounded-lg shadow-md bg-card">
       <div className="text-center">
         <p className="text-sm text-muted-foreground mb-2">
-          Room: {roomId} | {isCaller ? 'Caller' : 'Callee'} | {status}
+          Room: {roomId} | {isInitiator ? 'Initiator' : 'Receiver'} | {status}
           {status.includes('Starting') || status.includes('Getting') || status.includes('Setting') || status.includes('Creating') || status.includes('Joining') || status.includes('Waiting') || status.includes('Connecting') && <Loader2 className="inline h-4 w-4 animate-spin ml-2" />}
         </p>
       </div>
