@@ -88,6 +88,17 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
         }
     }, [localStream, remoteStream, roomId]);
 
+    const testConnection = useCallback(() => {
+        console.log('[WebRTC] Testing connection...');
+        if (pc.current) {
+            console.log('[WebRTC] Connection state:', pc.current.connectionState);
+            console.log('[WebRTC] ICE connection state:', pc.current.iceConnectionState);
+            console.log('[WebRTC] ICE gathering state:', pc.current.iceConnectionState);
+            console.log('[WebRTC] Local description:', pc.current.localDescription);
+            console.log('[WebRTC] Remote description:', pc.current.remoteDescription);
+        }
+    }, []);
+
     const getLocalStream = useCallback(async () => {
     try {
       console.log('Requesting media permissions...');
@@ -396,6 +407,33 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     if (!isComponentMounted || !pc.current) return;
                     console.log('[WebRTC] ICE gathering state:', pc.current.iceGatheringState);
                 };
+
+                // Add connection timeout
+                const connectionTimeout = setTimeout(() => {
+                    if (isComponentMounted && pc.current && pc.current.connectionState !== 'connected') {
+                        console.warn('[WebRTC] Connection timeout - forcing reconnection');
+                        setConnectionStatus("Connection timeout - retrying...");
+                        
+                        // Force reconnection by restarting ICE
+                        if (pc.current.restartIce) {
+                            pc.current.restartIce();
+                        }
+                    }
+                }, 15000); // 15 second timeout
+
+                // Cleanup timeout on successful connection
+                const checkConnection = setInterval(() => {
+                    if (pc.current && pc.current.connectionState === 'connected') {
+                        clearTimeout(connectionTimeout);
+                        clearInterval(checkConnection);
+                    }
+                }, 1000);
+
+                // Cleanup on unmount
+                return () => {
+                    clearTimeout(connectionTimeout);
+                    clearInterval(checkConnection);
+                };
             }
         };
 
@@ -585,6 +623,33 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
                 ) : null}
                 {connectionStatus}
+                {(connectionStatus.includes("connecting") || connectionStatus.includes("Processing")) && (
+                    <div className="mt-2 space-x-2">
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => {
+                                console.log('[WebRTC] Manual retry requested');
+                                setConnectionStatus("Retrying connection...");
+                                // Force reconnection
+                                if (pc.current && pc.current.restartIce) {
+                                    pc.current.restartIce();
+                                }
+                            }}
+                            className="text-xs"
+                        >
+                            إعادة المحاولة
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={testConnection}
+                            className="text-xs"
+                        >
+                            فحص الاتصال
+                        </Button>
+                    </div>
+                )}
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
