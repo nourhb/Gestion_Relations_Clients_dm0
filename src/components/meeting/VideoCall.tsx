@@ -25,6 +25,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
   const [status, setStatus] = useState("Starting...");
   const [isHost, setIsHost] = useState(false);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
+  const [remoteStreamSet, setRemoteStreamSet] = useState(false);
   const { toast } = useToast();
 
   const roomRef = doc(db, 'simple_rooms', roomId);
@@ -114,7 +115,15 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
     // Handle remote stream
     peerConnection.current.ontrack = (event) => {
       addDebugInfo("Remote stream received!");
+      
+      // Only set remote stream once
+      if (remoteStreamSet) {
+        addDebugInfo("Remote stream already set, skipping...");
+        return;
+      }
+      
       if (remoteVideoRef.current && event.streams[0]) {
+        setRemoteStreamSet(true);
         remoteVideoRef.current.srcObject = event.streams[0];
         setStatus("Connected!");
         addDebugInfo("Remote video element set");
@@ -214,6 +223,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
 
   const startCall = async () => {
     setStatus("Getting camera and microphone...");
+    setRemoteStreamSet(false); // Reset flag for new call
     const stream = await getLocalStream();
     if (!stream) return;
 
@@ -310,6 +320,7 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
 
     return () => {
       addDebugInfo("VideoCall component unmounting");
+      setRemoteStreamSet(false);
       unsubscribeRoom();
       unsubscribeCandidates();
       
