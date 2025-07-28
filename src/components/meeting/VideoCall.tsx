@@ -1,12 +1,25 @@
 
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, doc, onSnapshot, setDoc, updateDoc, getDoc, addDoc, deleteDoc, Unsubscribe } from 'firebase/firestore';
+import {
+  doc,
+  collection,
+  addDoc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  onSnapshot,
+  query,
+  where,
+  deleteDoc,
+  writeBatch,
+  Timestamp,
+} from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, ScreenShare, ScreenShareOff, Loader2, AlertCircle } from 'lucide-react';
+import { PhoneOff, Mic, MicOff, Video as VideoIcon, VideoOff, Share2, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface VideoCallProps {
@@ -17,761 +30,456 @@ interface VideoCallProps {
 
 const servers = {
   iceServers: [
-    {
-      urls: [
-        'stun:stun1.l.google.com:19302',
-        'stun:stun2.l.google.com:19302',
-        'stun:stun3.l.google.com:19302',
-        'stun:stun4.l.google.com:19302'
-      ],
-    },
-    {
-      urls: 'stun:stun.relay.metered.ca:80',
-    },
-    {
-      urls: 'stun:stun.stunprotocol.org:3478',
-    }
+    { urls: 'stun:stun.l.google.com:19302' },
   ],
   iceCandidatePoolSize: 10,
 };
 
-function isMobileDevice() {
-  return /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
-}
+const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  
+  const pc = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
 
-export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) {
-    const { toast } = useToast();
-    const isAdmin = userId === "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
-    console.log('[VideoCall] userId:', userId, 'isAdmin:', isAdmin);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [callStatus, setCallStatus] = useState<string>("Initializing...");
+  const { toast } = useToast();
+
+  const roomDocRef = useCallback(() => doc(db, 'videoCallRooms', roomId), [roomId]);
+  const offerCandidatesCollectionRef = useCallback(() => collection(db, 'videoCallRooms', roomId, 'offerCandidates'), [roomId]);
+  const answerCandidatesCollectionRef = useCallback(() => collection(db, 'videoCallRooms', roomId, 'answerCandidates'), [roomId]);
+
+  const setupPeerConnection = useCallback(() => {
+    if (pc.current && pc.current.signalingState !== 'closed') {
+      console.log("[WebRTC] PeerConnection may already exist and is not closed. Previous instance will be cleaned up by useEffect return or manually before new setup if needed.");
+    }
     
-    // Stable refs for connection objects and props
-    const pc = useRef<RTCPeerConnection | null>(null);
-    const onHangUpRef = useRef(onHangUp);
-    
-    // Refs for DOM elements
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    console.log("[WebRTC] Creating new RTCPeerConnection");
+    pc.current = new RTCPeerConnection(servers);
 
-    // State for media streams and UI controls
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [isVideoOff, setIsVideoOff] = useState(false);
-    const [isScreenSharing, setIsScreenSharing] = useState(false);
-    const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
-    const [waitingForHost, setWaitingForHost] = useState(false);
-    const [participants, setParticipants] = useState<{admin: boolean, guest: boolean}>({admin: false, guest: false});
-    const [callEnded, setCallEnded] = useState(false);
-    const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
-    const [connectionStatus, setConnectionStatus] = useState<string>("Initializing...");
-    const [mediaError, setMediaError] = useState<string | null>(null);
-
-    useEffect(() => {
-        onHangUpRef.current = onHangUp;
-    }, [onHangUp]);
-
-    const hangUp = useCallback(async () => {
-        console.log("Hanging up call");
-        
-        // Clean up WebRTC connection
-        if (pc.current) {
-            pc.current.getSenders().forEach(sender => sender.track?.stop());
-            pc.current.getReceivers().forEach(receiver => receiver.track?.stop());
-            if (pc.current.signalingState !== 'closed') {
-                pc.current.close();
-            }
-            pc.current = null;
-        }
-        
-        // Stop all media tracks
-        localStream?.getTracks().forEach(track => track.stop());
-        remoteStream?.getTracks().forEach(track => track.stop());
-
-        setLocalStream(null);
-        setRemoteStream(null);
-
-        // Mark call as ended in Firestore
-        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
-        await setDoc(roomDocRef, { ended: true }, { merge: true });
-
-        if (onHangUpRef.current) {
-            onHangUpRef.current();
-        }
-    }, [localStream, remoteStream, roomId]);
-
-    const testConnection = useCallback(() => {
-        console.log('[WebRTC] Testing connection...');
-        if (pc.current) {
-            console.log('[WebRTC] Connection state:', pc.current.connectionState);
-            console.log('[WebRTC] ICE connection state:', pc.current.iceConnectionState);
-            console.log('[WebRTC] ICE gathering state:', pc.current.iceConnectionState);
-            console.log('[WebRTC] Local description:', pc.current.localDescription);
-            console.log('[WebRTC] Remote description:', pc.current.remoteDescription);
-        }
-        
-        // Test network connectivity
-        console.log('[WebRTC] Testing network connectivity...');
-        fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' })
-            .then(() => console.log('[WebRTC] Network connectivity: OK'))
-            .catch(() => console.warn('[WebRTC] Network connectivity: Issues detected'));
-    }, []);
-
-    const getLocalStream = useCallback(async () => {
-    try {
-      console.log('Requesting media permissions...');
-      
-      // First try with both audio and video
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        }
-      });
-      
-      console.log('Media access granted:', stream.getTracks().map(t => `${t.kind}: ${t.label}`));
-      setLocalStream(stream);
-      setMediaError(null);
-      
-    } catch (error: any) {
-      console.warn('Failed to get audio+video, trying audio only:', error.message);
-      
-      try {
-        // Fallback to audio only
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false
-        });
-        
-        console.log('Audio-only access granted');
-        setLocalStream(audioStream);
-        setMediaError('فيديو غير متاح، سيتم استخدام الصوت فقط');
-        
-      } catch (audioError: any) {
-        console.warn('Failed to get audio, trying video only:', audioError.message);
-        
+    pc.current.onicecandidate = async (event) => {
+      if (event.candidate && pc.current?.localDescription) {
+        console.log("[WebRTC] Found ICE candidate (first 20 chars):", event.candidate.candidate.substring(0,20));
+        const targetCollection = pc.current.localDescription.type === 'offer' 
+          ? offerCandidatesCollectionRef() 
+          : answerCandidatesCollectionRef();
         try {
-          // Last resort: video only
-          const videoStream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 }
-            }
-          });
-          
-          console.log('Video-only access granted');
-          setLocalStream(videoStream);
-          setMediaError('صوت غير متاح، سيتم استخدام الفيديو فقط');
-          
-        } catch (videoError: any) {
-          console.error('All media access failed:', videoError);
-          setMediaError('لا يمكن الوصول إلى الكاميرا أو الميكروفون. يرجى التحقق من الأذونات.');
-          
-          // Create a dummy stream to allow the call to continue
-          const dummyStream = new MediaStream();
-          setLocalStream(dummyStream);
+          await addDoc(targetCollection, { ...event.candidate.toJSON(), senderId: userId });
+          console.log(`[WebRTC] Sent ${pc.current.localDescription.type} candidate`);
+        } catch (error) {
+          console.error(`[WebRTC] Error sending ${pc.current.localDescription.type} candidate:`, error)
         }
       }
-    }
-  }, []);
-
-    // 1. Effect for acquiring local media
-    useEffect(() => {
-        if (localStream) return;
-        
-        setConnectionStatus("Requesting media access...");
-        getLocalStream().then(() => {
-            setConnectionStatus("Local stream ready");
-        }).catch((error) => {
-            console.error("Failed to get local stream:", error);
-            setConnectionStatus("Media access failed");
-        });
-    }, [localStream, getLocalStream]);
-
-    // Effect to set up video elements when local stream is available
-    useEffect(() => {
-        if (localStream && localVideoRef.current) {
-            localVideoRef.current.srcObject = localStream;
-            const videoTrack = localStream.getVideoTracks()[0];
-            if (videoTrack) {
-                cameraTrackRef.current = videoTrack;
-            }
-        }
-    }, [localStream]);
-
-    // 2. Effect for WebRTC signaling
-    useEffect(() => {
-        if (!localStream) {
-            console.log("Waiting for local stream...");
-            return;
-        }
-
-        let isComponentMounted = true;
-        let roomUnsubscribe: Unsubscribe | null = null;
-        let offerCandidatesUnsubscribe: Unsubscribe | null = null;
-        let answerCandidatesUnsubscribe: Unsubscribe | null = null;
-
-        const setupSignaling = async () => {
-            const callDocRef = doc(db, 'webrtc_sessions', roomId);
-            const callDocSnap = await getDoc(callDocRef);
-            const offerDescription = callDocSnap.data()?.offer;
-
-            if (isAdmin) {
-                // Admin logic: Always create a new offer when joining
-                console.log('[WebRTC] Admin joining - creating new offer');
-                setConnectionStatus("Creating offer...");
-                const peerConnection = new RTCPeerConnection(servers);
-                pc.current = peerConnection;
-
-                // Add local tracks
-                localStream.getTracks().forEach(track => {
-                    console.log('[WebRTC] Adding local track:', track.kind);
-                    peerConnection.addTrack(track, localStream);
-                });
-
-                // Handle remote stream
-                peerConnection.ontrack = (event) => {
-                    console.log('[WebRTC] Received remote track');
-                    if (remoteVideoRef.current) {
-                        remoteVideoRef.current.srcObject = event.streams[0];
-                    }
-                    setRemoteStream(event.streams[0]);
-                };
-
-                // Collect ICE candidates
-                peerConnection.onicecandidate = async (event) => {
-                    if (event.candidate) {
-                        try {
-                            console.log('[WebRTC] Sending ICE candidate');
-                            await addDoc(collection(callDocRef, 'offerCandidates'), event.candidate.toJSON());
-                        } catch (error) {
-                            console.warn('[WebRTC] Failed to send ICE candidate:', error);
-                        }
-                    }
-                };
-
-                // Create and send offer
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                
-                try {
-                    await setDoc(callDocRef, { 
-                        offer: { sdp: offer.sdp, type: offer.type },
-                        participants: { admin: true },
-                        timestamp: new Date().toISOString()
-                    }, { merge: true });
-                    setConnectionStatus("Offer created, waiting for answer...");
-                    console.log('[WebRTC] Offer created and sent');
-                } catch (err) {
-                    console.error('[WebRTC] Error creating offer:', err);
-                    setConnectionStatus("Failed to create offer");
-                }
-
-                // Listen for answer
-                roomUnsubscribe = onSnapshot(callDocRef, snapshot => {
-                    if (!isComponentMounted || !pc.current) return;
-                    const data = snapshot.data();
-                    console.log('[WebRTC] Room document updated:', data);
-                    if (data?.answer && !pc.current.remoteDescription) {
-                        console.log('[WebRTC] Received answer:', data.answer);
-                        const answerDesc = new RTCSessionDescription(data.answer);
-                        pc.current.setRemoteDescription(answerDesc);
-                        setConnectionStatus("Answer received, connecting...");
-                    } else if (data?.answer && pc.current.remoteDescription) {
-                        console.log('[WebRTC] Answer already processed');
-                    } else if (!data?.answer) {
-                        console.log('[WebRTC] No answer in room document yet');
-                    }
-                });
-
-                // Listen for answer ICE candidates
-                answerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'answerCandidates'), snapshot => {
-                    if (!isComponentMounted || !pc.current) return;
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added') {
-                            const candidate = new RTCIceCandidate(change.doc.data());
-                            pc.current?.addIceCandidate(candidate);
-                            console.log('[WebRTC] Added answer ICE candidate');
-                        }
-                    });
-                });
-            } else {
-                // Guest logic: Wait for offer
-                if (!offerDescription || !offerDescription.type || !offerDescription.sdp) {
-                    setWaitingForHost(true);
-                    setConnectionStatus("Waiting for host to create offer...");
-                    return;
-                }
-
-                setWaitingForHost(false);
-                setConnectionStatus("Processing offer...");
-
-                // Add timeout for offer processing
-                const offerTimeout = setTimeout(() => {
-                    if (isComponentMounted) {
-                        console.warn('[WebRTC] Offer processing timeout - taking too long');
-                        setConnectionStatus("Offer processing timeout");
-                    }
-                }, 10000); // 10 second timeout
-
-                // Create peer connection as guest
-                const peerConnection = new RTCPeerConnection(servers);
-                pc.current = peerConnection;
-
-                // Add local tracks
-                localStream.getTracks().forEach(track => {
-                    console.log('[WebRTC] Adding local track:', track.kind);
-                    peerConnection.addTrack(track, localStream);
-                });
-
-                // Handle remote stream
-                peerConnection.ontrack = (event) => {
-                    console.log('[WebRTC] Received remote track');
-                    if (remoteVideoRef.current) {
-                        remoteVideoRef.current.srcObject = event.streams[0];
-                    }
-                    setRemoteStream(event.streams[0]);
-                };
-
-                // Collect ICE candidates
-                peerConnection.onicecandidate = async (event) => {
-                    if (event.candidate) {
-                        try {
-                            console.log('[WebRTC] Sending ICE candidate');
-                            await addDoc(collection(callDocRef, 'answerCandidates'), event.candidate.toJSON());
-                        } catch (error) {
-                            console.warn('[WebRTC] Failed to send ICE candidate:', error);
-                        }
-                    }
-                };
-
-                // Process offer and create answer
-                try {
-                    console.log('[WebRTC] Setting remote description with offer:', offerDescription);
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offerDescription));
-                    console.log('[WebRTC] Remote description set successfully');
-                    
-                    console.log('[WebRTC] Creating answer...');
-                    const answer = await peerConnection.createAnswer();
-                    console.log('[WebRTC] Answer created:', answer);
-                    
-                    console.log('[WebRTC] Setting local description...');
-                    await peerConnection.setLocalDescription(answer);
-                    console.log('[WebRTC] Local description set successfully');
-                    
-                    console.log('[WebRTC] Sending answer to Firestore...');
-                    await updateDoc(callDocRef, { 
-                        answer: { sdp: answer.sdp, type: answer.type },
-                        participants: { guest: true },
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    setConnectionStatus("Answer sent, connecting...");
-                    console.log('[WebRTC] Answer created and sent successfully');
-                    clearTimeout(offerTimeout);
-                } catch (error) {
-                    console.error('[WebRTC] Error processing offer:', error);
-                    console.error('[WebRTC] Error details:', {
-                        message: error.message,
-                        name: error.name,
-                        stack: error.stack
-                    });
-                    setConnectionStatus(`Failed to process offer: ${error.message}`);
-                    clearTimeout(offerTimeout);
-                }
-
-                // Listen for offer ICE candidates
-                offerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'offerCandidates'), snapshot => {
-                    if (!isComponentMounted || !pc.current) return;
-                    snapshot.docChanges().forEach(change => {
-                        if (change.type === 'added') {
-                            const candidate = new RTCIceCandidate(change.doc.data());
-                            pc.current?.addIceCandidate(candidate);
-                            console.log('[WebRTC] Added offer ICE candidate');
-                        }
-                    });
-                });
-            }
-
-            // Set up connection state monitoring
-            if (pc.current) {
-                pc.current.onconnectionstatechange = () => {
-                    if (!isComponentMounted || !pc.current) return;
-                    console.log('[WebRTC] Connection state:', pc.current.connectionState);
-                    setConnectionStatus(`Connection: ${pc.current.connectionState}`);
-                    
-                    if (pc.current.connectionState === 'connected') {
-                        setConnectionStatus("Connected");
-                    } else if (['disconnected', 'failed', 'closed'].includes(pc.current.connectionState)) {
-                        setConnectionStatus("Connection lost");
-                    }
-                };
-
-                pc.current.oniceconnectionstatechange = () => {
-                    if (!isComponentMounted || !pc.current) return;
-                    console.log('[WebRTC] ICE connection state:', pc.current.iceConnectionState);
-                    if (pc.current.iceConnectionState === 'connected') {
-                        setConnectionStatus("ICE Connected");
-                    } else if (['disconnected', 'failed', 'closed'].includes(pc.current.iceConnectionState)) {
-                        setConnectionStatus("ICE Connection lost");
-                    }
-                };
-
-                pc.current.onicegatheringstatechange = () => {
-                    if (!isComponentMounted || !pc.current) return;
-                    console.log('[WebRTC] ICE gathering state:', pc.current.iceGatheringState);
-                };
-
-                // Add connection timeout with fallback strategies
-                let retryCount = 0;
-                const maxRetries = 3;
-                
-                const connectionTimeout = setTimeout(() => {
-                    if (isComponentMounted && pc.current && pc.current.connectionState !== 'connected') {
-                        retryCount++;
-                        console.warn(`[WebRTC] Connection timeout - retry ${retryCount}/${maxRetries}`);
-                        
-                        if (retryCount <= maxRetries) {
-                            setConnectionStatus(`Connection timeout - retrying (${retryCount}/${maxRetries})...`);
-                            
-                            // Try different strategies
-                            if (pc.current.restartIce) {
-                                pc.current.restartIce();
-                            }
-                            
-                            // If still failing, try with different constraints
-                            if (retryCount === maxRetries) {
-                                console.warn('[WebRTC] All retries failed - trying with minimal constraints');
-                                setConnectionStatus("Trying minimal connection...");
-                            }
-                        } else {
-                            setConnectionStatus("Connection failed - check network settings");
-                            console.error('[WebRTC] All connection attempts failed');
-                        }
-                    }
-                }, 15000); // 15 second timeout
-
-                // Cleanup timeout on successful connection
-                const checkConnection = setInterval(() => {
-                    if (pc.current && pc.current.connectionState === 'connected') {
-                        clearTimeout(connectionTimeout);
-                        clearInterval(checkConnection);
-                    }
-                }, 1000);
-
-                // Cleanup on unmount
-                return () => {
-                    clearTimeout(connectionTimeout);
-                    clearInterval(checkConnection);
-                };
-            }
-        };
-
-        setupSignaling();
-
-        return () => {
-            isComponentMounted = false;
-            if (roomUnsubscribe) roomUnsubscribe();
-            if (offerCandidatesUnsubscribe) offerCandidatesUnsubscribe();
-            if (answerCandidatesUnsubscribe) answerCandidatesUnsubscribe();
-        };
-    }, [localStream, roomId, isAdmin]);
-
-    // Cleanup effect for component unmounting
-    useEffect(() => {
-        return () => {
-            // Clean up when component unmounts
-            if (pc.current) {
-                pc.current.close();
-                pc.current = null;
-            }
-            
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            
-            if (remoteStream) {
-                remoteStream.getTracks().forEach(track => track.stop());
-            }
-        };
-    }, [localStream, remoteStream]);
-
-    // Track participants in Firestore
-    useEffect(() => {
-        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
-        let unsub: Unsubscribe | null = null;
-        
-        const updatePresence = async (present: boolean) => {
-            const field = isAdmin ? 'admin' : 'guest';
-            await setDoc(roomDocRef, { participants: { [field]: present } }, { merge: true });
-        };
-        
-        updatePresence(true);
-        
-        unsub = onSnapshot(roomDocRef, (snap) => {
-            const data = snap.data();
-            if (data && data.participants) {
-                setParticipants({
-                    admin: !!data.participants.admin,
-                    guest: !!data.participants.guest
-                });
-            }
-        });
-        
-        return () => {
-            updatePresence(false);
-            if (unsub) unsub();
-        };
-    }, [roomId, isAdmin]);
-
-    // Real-time call end detection
-    useEffect(() => {
-        const roomDocRef = doc(db, 'webrtc_sessions', roomId);
-        const unsub = onSnapshot(roomDocRef, (snap) => {
-            const data = snap.data();
-            if (data && data.ended) {
-                setCallEnded(true);
-                setTimeout(() => {
-                    if (onHangUpRef.current) onHangUpRef.current();
-                }, 1000);
-            }
-        });
-        return () => { if (unsub) unsub(); };
-    }, [roomId]);
-
-    const toggleMute = () => {
-        if (localStream) {
-            localStream.getAudioTracks().forEach(track => {
-                track.enabled = !track.enabled;
-                setIsMuted(!track.enabled);
-            });
-        }
     };
 
-    const toggleVideo = () => {
-        if (localStream) {
-            localStream.getVideoTracks().forEach(track => {
-                if (track.label.includes('camera')) {
-                    track.enabled = !track.enabled;
-                    setIsVideoOff(!track.enabled);
-                }
-            });
-        }
-    };
-
-    const toggleScreenShare = async () => {
-        if (!pc.current) return;
-
-        const videoSender = pc.current.getSenders().find(s => s.track?.kind === 'video');
-        if (!videoSender) {
-            toast({ variant: 'destructive', title: "خطأ", description: "تعذر العثور على مسار الفيديو لاستبداله."});
-            return;
-        }
-
-        if (isScreenSharing) {
-            // Stop screen sharing, switch back to camera
-            if (cameraTrackRef.current) {
-                await videoSender.replaceTrack(cameraTrackRef.current);
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = new MediaStream([cameraTrackRef.current, ...localStream!.getAudioTracks()]);
-                }
-                localStream?.getVideoTracks().forEach(track => {
-                    if(!track.label.includes('camera')) track.stop();
-                });
-                setIsScreenSharing(false);
-            }
+    pc.current.ontrack = (event) => {
+      console.log("[WebRTC] Received remote track:", event.streams[0]);
+      setCallStatus("Remote stream received.");
+      if (event.streams && event.streams[0]) {
+        remoteStreamRef.current = event.streams[0];
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStreamRef.current;
+          console.log("[WebRTC] Remote video stream attached to video element.");
         } else {
-            // Start screen sharing
-            try {
-                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const screenTrack = displayStream.getVideoTracks()[0];
-                if (!screenTrack) return;
+           console.warn("[WebRTC] Remote video ref not available when remote track was received.");
+        }
+      }
+    };
 
-                await videoSender.replaceTrack(screenTrack);
-                
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = new MediaStream([screenTrack]);
-                }
-                
-                setIsScreenSharing(true);
-
-                // When user clicks the browser's "Stop sharing" button
-                screenTrack.onended = () => {
-                    if (videoSender && cameraTrackRef.current) {
-                        videoSender.replaceTrack(cameraTrackRef.current!).then(() => {
-                            if(localVideoRef.current) {
-                                localVideoRef.current.srcObject = new MediaStream([cameraTrackRef.current!, ...localStream!.getAudioTracks()]);
-                            }
-                            setIsScreenSharing(false);
-                        });
-                    }
-                };
-
-            } catch (error) {
-                console.error("Error starting screen share:", error);
-                toast({ variant: 'destructive', title: "فشل مشاركة الشاشة", description: "تعذر بدء مشاركة الشاشة." });
+    pc.current.onconnectionstatechange = () => {
+      if (pc.current) {
+        console.log(`[WebRTC] Connection state: ${pc.current.connectionState}`);
+        setCallStatus(`Connection: ${pc.current.connectionState}`); 
+        if (pc.current.connectionState === 'connected') {
+             // setCallStatus("Connected"); // Already handled
+        } else if (['disconnected', 'failed', 'closed'].includes(pc.current.connectionState)) {
+            console.warn(`[WebRTC] Peer connection state is ${pc.current.connectionState}. Call might be ending or failing.`);
+        }
+      }
+    };
+    pc.current.onsignalingstatechange = () => {
+        if(pc.current) {
+            console.log(`[WebRTC] Signaling state: ${pc.current.signalingState}`);
+        }
+    };
+    pc.current.oniceconnectionstatechange = () => {
+        if(pc.current) {
+            console.log(`[WebRTC] ICE connection state: ${pc.current.iceConnectionState}`);
+             if (pc.current.iceConnectionState === 'failed') {
+                console.error("[WebRTC] ICE connection failed. Restarting ICE might be needed for complex NATs, or check STUN/TURN.");
+                setCallStatus("ICE connection failed");
             }
         }
+    }
+  }, [offerCandidatesCollectionRef, answerCandidatesCollectionRef, userId]);
+
+  const startLocalStream = useCallback(async () => {
+    if (localStreamRef.current) {
+      console.log("[WebRTC] Local stream already exists.");
+      if (localVideoRef.current && !localVideoRef.current.srcObject) {
+         localVideoRef.current.srcObject = localStreamRef.current; 
+         console.log("[WebRTC] Re-attached existing local stream to video element.");
+      }
+      if (pc.current && pc.current.signalingState !== 'closed') {
+        localStreamRef.current.getTracks().forEach((track) => {
+            if (!pc.current?.getSenders().find(s => s.track === track)) {
+                 console.log("[WebRTC] Re-adding local track to PeerConnection:", track.kind);
+                 pc.current?.addTrack(track, localStreamRef.current!);
+            }
+        });
+      }
+      setCallStatus("Local stream ready."); // Update status even if stream reused
+      return localStreamRef.current;
+    }
+    try {
+      console.log("[WebRTC] Requesting local media stream...");
+      setCallStatus("Requesting media access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        console.log("[WebRTC] Local video stream attached to video element.");
+      } else {
+        console.warn("[WebRTC] Local video ref not available when stream was ready.");
+      }
+      
+      if (pc.current && pc.current.signalingState !== 'closed') {
+        stream.getTracks().forEach((track) => {
+           console.log("[WebRTC] Adding initial local track to PeerConnection:", track.kind);
+           pc.current?.addTrack(track, stream);
+        });
+      } else {
+        console.warn("[WebRTC] pc.current not ready or closed when trying to add initial local tracks.");
+      }
+      setCallStatus("Local stream started."); 
+      return stream;
+    } catch (error) {
+      console.error("[WebRTC] Error accessing media devices.", error);
+      setCallStatus("Error: Could not access camera/microphone.");
+      toast({
+        variant: "destructive",
+        title: "Media Access Error",
+        description: "Could not access your camera or microphone. Please check permissions.",
+      });
+      return null;
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    console.log(`[WebRTC EFFECT] Mount/Update for roomId: ${roomId}, userId: ${userId}`);
+    
+    let isMounted = true;
+    const currentPcRef = pc; 
+
+    const cleanup = async () => {
+      console.log("[WebRTC EFFECT CLEANUP] Cleaning up for roomId:", roomId);
+
+      if (currentPcRef.current) {
+        currentPcRef.current.getSenders().forEach(sender => {
+          if (sender.track) sender.track.stop();
+        });
+        currentPcRef.current.close();
+        currentPcRef.current = null; 
+        console.log("[WebRTC EFFECT CLEANUP] PeerConnection closed.");
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+        console.log("[WebRTC EFFECT CLEANUP] Local stream stopped.");
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+      }
+
+      try {
+        const currentRoomDoc = roomDocRef();
+        const roomSnap = await getDoc(currentRoomDoc);
+        if (roomSnap.exists() && isMounted) { 
+          const roomData = roomSnap.data();
+          const participants = roomData.participants || [];
+          const updatedParticipants = participants.filter((pId: string) => pId !== userId);
+
+          if (updatedParticipants.length === 0 && roomData.offer?.sdp) { // Only delete if I created the offer and am last
+            console.log("[WebRTC EFFECT CLEANUP] Last participant who created offer left. Deleting room and candidates.");
+            const batch = writeBatch(db);
+            const offerCandSnap = await getDocs(offerCandidatesCollectionRef());
+            offerCandSnap.forEach(doc => batch.delete(doc.ref));
+            const answerCandSnap = await getDocs(answerCandidatesCollectionRef());
+            answerCandSnap.forEach(doc => batch.delete(doc.ref));
+            batch.delete(currentRoomDoc);
+            await batch.commit();
+          } else if (participants.includes(userId)) {
+            await updateDoc(currentRoomDoc, { participants: updatedParticipants });
+            console.log("[WebRTC EFFECT CLEANUP] Updated participants list.");
+          }
+        }
+      } catch (error) {
+        console.error("[WebRTC EFFECT CLEANUP] Error cleaning up Firestore room:", error);
+      }
     };
     
-    if (waitingForHost) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full py-12">
-                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-                <div className="text-lg font-semibold mb-2">في انتظار المضيف لبدء الجلسة...</div>
-                <div className="text-muted-foreground">يرجى إبقاء هذه الصفحة مفتوحة. سيتم الانضمام تلقائيًا عند بدء الجلسة.</div>
-                <div className="mt-4 text-sm text-muted-foreground">
-                    <span>الحالة: </span>
-                    <span>{participants.admin ? 'المضيف متصل' : 'المضيف غير متصل'} | {participants.guest ? 'الضيف متصل' : 'الضيف غير متصل'}</span>
-                </div>
-            </div>
-        );
-    }
+    const initializeMediaAndSignaling = async () => {
+      if (!isMounted) return;
+      console.log("[WebRTC INIT] Initializing media and signaling...");
+      setupPeerConnection(); 
 
-    if (callEnded) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full py-12">
-                <div className="text-lg font-semibold mb-2">انتهت المكالمة</div>
-                <div className="text-muted-foreground">لقد غادر أحد الأطراف استشارة الفيديو.</div>
-            </div>
-        );
-    }
+      if (!pc.current) {
+        console.error("[WebRTC INIT] PeerConnection not initialized after setup. Cannot proceed.");
+        if (isMounted) setCallStatus("Error: PeerConnection setup failed.");
+        return;
+      }
+      
+      const stream = await startLocalStream();
+      if (!stream || !localStreamRef.current) {
+          console.warn("[WebRTC INIT] Local stream not available. Cannot proceed with signaling.");
+          return;
+      }
 
-    return (
-        <div className="flex flex-col items-center space-y-4 w-full">
-            {mediaError && (
-                <Alert className="mb-4">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>تنبيه</AlertTitle>
-                    <AlertDescription>{mediaError}</AlertDescription>
-                </Alert>
-            )}
+      if (!pc.current || pc.current.signalingState === 'closed') {
+        console.warn("[WebRTC INIT] PeerConnection is closed or null before signaling. Aborting.");
+        if (isMounted) setCallStatus("Error: PeerConnection closed unexpectedly.");
+        return;
+      }
+      
+      if (isMounted) setCallStatus("Checking room status...");
+      const currentRoomDoc = roomDocRef();
+      const roomSnapshot = await getDoc(currentRoomDoc);
+
+      if (!isMounted || !pc.current || pc.current.signalingState === 'closed') return;
+
+      if (!roomSnapshot.exists() || !roomSnapshot.data()?.offer) {
+          console.log("[WebRTC INIT CALLER] Room does not exist or no offer. Creating offer.");
+          if (isMounted) setCallStatus("Creating offer...");
+          try {
+            const offerDescription = await pc.current.createOffer();
+            await pc.current.setLocalDescription(offerDescription);
             
-            <div className="text-sm text-center text-muted-foreground mb-2">
-                {connectionStatus.includes("Initializing") || connectionStatus.includes("Creating") || 
-                 connectionStatus.includes("Processing") || connectionStatus.includes("Waiting") ? (
-                    <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
-                ) : null}
-                {connectionStatus}
-                {(connectionStatus.includes("connecting") || connectionStatus.includes("Processing")) && (
-                    <div className="mt-2 space-x-2">
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => {
-                                console.log('[WebRTC] Manual retry requested');
-                                setConnectionStatus("Retrying connection...");
-                                // Force reconnection
-                                if (pc.current && pc.current.restartIce) {
-                                    pc.current.restartIce();
-                                }
-                            }}
-                            className="text-xs"
-                        >
-                            إعادة المحاولة
-                        </Button>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={testConnection}
-                            className="text-xs"
-                        >
-                            فحص الاتصال
-                        </Button>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => {
-                                console.log('[WebRTC] Testing basic WebRTC functionality...');
-                                const testPC = new RTCPeerConnection(servers);
-                                testPC.createOffer()
-                                    .then(offer => {
-                                        console.log('[WebRTC] Basic WebRTC test: Offer created successfully');
-                                        return testPC.setLocalDescription(offer);
-                                    })
-                                    .then(() => {
-                                        console.log('[WebRTC] Basic WebRTC test: Local description set');
-                                        testPC.close();
-                                    })
-                                    .catch(error => {
-                                        console.error('[WebRTC] Basic WebRTC test failed:', error);
-                                        testPC.close();
-                                    });
-                            }}
-                            className="text-xs"
-                        >
-                            اختبار WebRTC
-                        </Button>
-                    </div>
-                )}
-            </div>
+            const offerPayload = { type: offerDescription.type, sdp: offerDescription.sdp };
+            await setDoc(currentRoomDoc, { 
+              offer: offerPayload,
+              participants: [userId],
+              createdAt: Timestamp.now() // Use Firestore Timestamp
+            }, { merge: true });
+            if (isMounted) setCallStatus("Offer created. Waiting for peer...");
+            console.log("[WebRTC INIT CALLER] Offer created and room doc initialized.");
+          } catch (error) {
+            console.error("[WebRTC INIT CALLER] Error creating offer:", error);
+            if (isMounted) setCallStatus("Error: Failed to create offer.");
+          }
+      } else { 
+        const roomData = roomSnapshot.data();
+        const currentParticipants = roomData?.participants || [];
+        if (!currentParticipants.includes(userId)) { 
+            await updateDoc(currentRoomDoc, { participants: [...currentParticipants, userId] });
+            console.log("[WebRTC INIT] Added self to participants list.");
+        }
+        
+        if (roomData?.offer && !roomData?.answer && roomData.offer.sdp !== pc.current.localDescription?.sdp) { 
+            console.log(`[WebRTC INIT CALLEE] Offer found. Current PC signalingState: ${pc.current.signalingState}`);
+            if (isMounted) setCallStatus("Received offer. Processing...");
+            const offerDescription = new RTCSessionDescription(roomData.offer);
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                <div className="relative">
-                    <video ref={localVideoRef} autoPlay playsInline muted className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100" />
-                    <div className="absolute bottom-2 left-2 bg-black/50 text-white text-sm px-2 py-1 rounded">
-                        أنت ({isAdmin ? 'المضيف' : 'الضيف'})
-                    </div>
-                </div>
-                <div className="relative">
-                    <video
-                        ref={remoteVideoRef}
-                        autoPlay
-                        playsInline
-                        muted={false}
-                        className="w-full rounded-lg shadow-lg bg-black aspect-video object-cover transform -scale-x-100"
-                        onPlay={() => setRemoteAudioBlocked(false)}
-                        onPause={() => setRemoteAudioBlocked(true)}
-                    />
-                    {remoteAudioBlocked && (
-                        <div
-                            className="absolute inset-0 flex items-center justify-center bg-black/60 text-white cursor-pointer z-10"
-                            onClick={() => {
-                                if (remoteVideoRef.current) {
-                                    remoteVideoRef.current.muted = false;
-                                    remoteVideoRef.current.play();
-                                    setRemoteAudioBlocked(false);
-                                }
-                            }}
-                        >
-                            اضغط لتفعيل الصوت
-                        </div>
-                    )}
-                    <div className="absolute bottom-2 left-2 bg-black/50 text-white text-sm px-2 py-1 rounded">
-                        {isAdmin ? 'الضيف' : 'المضيف'} {isAdmin ? (participants.guest ? '(متصل)' : '(غير متصل)') : (participants.admin ? '(متصل)' : '(غير متصل)')}
-                    </div>
-                </div>
-            </div>
-            <div className="flex items-center justify-center space-x-4">
-                <Button onClick={toggleMute} variant={isMuted ? "destructive" : "secondary"} size="icon" className="rounded-full h-12 w-12">
-                    {isMuted ? <MicOff /> : <Mic />}
-                </Button>
-                <Button onClick={toggleVideo} variant={isVideoOff ? "destructive" : "secondary"} size="icon" className="rounded-full h-12 w-12" disabled={isScreenSharing}>
-                    {isVideoOff ? <VideoOff /> : <VideoIcon />}
-                </Button>
-                {isMobileDevice() ? (
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        size="icon"
-                        className="rounded-full h-12 w-12 opacity-50 cursor-not-allowed"
-                        onClick={() => toast({ title: "غير مدعوم", description: "مشاركة الشاشة غير مدعومة على الجوال." })}
-                        disabled
-                    >
-                        <ScreenShareOff />
-                    </Button>
-                ) : (
-                    <Button onClick={toggleScreenShare} variant={isScreenSharing ? "default" : "secondary"} size="icon" className="rounded-full h-12 w-12">
-                        {isScreenSharing ? <ScreenShareOff /> : <ScreenShare />}
-                    </Button>
-                )}
-                <Button onClick={hangUp} variant="destructive" size="icon" className="rounded-full h-16 w-16">
-                    <PhoneOff />
-                </Button>
-            </div>
+            try {
+              if (isMounted) setCallStatus("Setting remote offer description...");
+              await pc.current.setRemoteDescription(offerDescription);
+              if (!isMounted) return;
+              console.log("[WebRTC INIT CALLEE] Successfully set remote description for offer.");
+
+              if (isMounted) setCallStatus("Creating answer...");
+              const answerDescription = await pc.current.createAnswer();
+              if (!isMounted) return;
+              console.log("[WebRTC INIT CALLEE] Successfully created answer object.");
+
+              if (isMounted) setCallStatus("Setting local answer description...");
+              await pc.current.setLocalDescription(answerDescription);
+              if (!isMounted) return;
+              console.log("[WebRTC INIT CALLEE] Successfully set local description for answer.");
+
+              if (isMounted) setCallStatus("Sending answer to Firestore...");
+              const answerPayload = { type: answerDescription.type, sdp: answerDescription.sdp };
+              await updateDoc(currentRoomDoc, { answer: answerPayload });
+              if (!isMounted) return;
+              if (isMounted) setCallStatus("Answer sent. Connecting (ICE)...");
+              console.log("[WebRTC INIT CALLEE] Answer created and sent to Firestore.");
+            } catch (error:any) {
+              console.error("[WebRTC INIT CALLEE] Error processing offer or creating/sending answer:", error);
+              if (isMounted) setCallStatus(`Error in answer: ${String(error.message || error).substring(0,50)}`);
+            }
+        } else if (roomData?.offer && roomData?.answer) {
+            console.log("[WebRTC INIT] Room already has offer and answer. Attempting to connect/reconnect.");
+            if (isMounted) setCallStatus("Rejoining/Connecting to call...");
+        }
+      }
+    };
+
+    initializeMediaAndSignaling();
+    
+    const currentRoomDocUnsub = roomDocRef();
+    const roomUnsubscribe = onSnapshot(currentRoomDocUnsub, async (snapshot) => {
+      if (!isMounted || !pc.current || pc.current.signalingState === 'closed') return;
+      const data = snapshot.data();
+      console.log("[WebRTC LISTENER Room] Snapshot. Data:", data ? { offer: !!data.offer, answer: !!data.answer, participants: data.participants } : "No data");
+
+      if (data?.answer && pc.current.localDescription?.type === 'offer' && 
+          (!pc.current.remoteDescription || pc.current.remoteDescription.sdp !== data.answer.sdp)) {
+        console.log("[WebRTC LISTENER Room] Offerer received answer. Setting remote description.");
+        if (isMounted) setCallStatus("Received answer. Processing...");
+        const answerDescription = new RTCSessionDescription(data.answer);
+        try {
+          await pc.current.setRemoteDescription(answerDescription);
+          console.log("[WebRTC LISTENER Room] Offerer: Successfully set remote description for answer.");
+          if (isMounted) setCallStatus("Answer processed. Connection should establish via ICE.");
+        } catch (error:any) {
+            console.error("[WebRTC LISTENER Room] Offerer: Error setting remote desc for answer:", error);
+            if (isMounted) setCallStatus(`Error setting answer: ${String(error.message || error).substring(0,30)}`);
+        }
+      }
+    });
+
+    const currentOfferCandColUnsub = offerCandidatesCollectionRef();
+    const offerCandidatesUnsubscribe = onSnapshot(
+      query(currentOfferCandColUnsub, where("senderId", "!=", userId)), (snapshot) => {
+      if (!isMounted || !pc.current || pc.current.signalingState === 'closed') return;
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          if (pc.current?.remoteDescription) { 
+            console.log("[WebRTC LISTENER OfferCand] Received offerer ICE candidate (from other peer)");
+            const candidate = new RTCIceCandidate(change.doc.data());
+            try {
+              await pc.current.addIceCandidate(candidate);
+              console.log("[WebRTC LISTENER OfferCand] Added offerer ICE candidate successfully.");
+            } catch (error) {
+              console.error("[WebRTC LISTENER OfferCand] Error adding received ICE candidate:", error);
+            }
+          } else {
+            console.warn("[WebRTC LISTENER OfferCand] SKIPPED adding ICE candidate: remoteDescription not yet set or pc not ready.");
+          }
+        }
+      });
+    });
+    
+    const currentAnswCandColUnsub = answerCandidatesCollectionRef();
+    const answerCandidatesUnsubscribe = onSnapshot(
+      query(currentAnswCandColUnsub, where("senderId", "!=", userId)), (snapshot) => {
+      if (!isMounted || !pc.current || pc.current.signalingState === 'closed') return;
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+           if (pc.current?.remoteDescription) {
+            console.log("[WebRTC LISTENER AnswerCand] Received answerer ICE candidate (from other peer)");
+            const candidate = new RTCIceCandidate(change.doc.data());
+            try {
+              await pc.current.addIceCandidate(candidate);
+              console.log("[WebRTC LISTENER AnswerCand] Added answerer ICE candidate successfully.");
+            } catch (error) {
+              console.error("[WebRTC LISTENER AnswerCand] Error adding received ICE candidate :", error);
+            }
+          } else {
+             console.warn("[WebRTC LISTENER AnswerCand] SKIPPED adding ICE candidate: remoteDescription not yet set or pc not ready.");
+          }
+        }
+      });
+    });
+
+    return () => {
+      console.log("[WebRTC EFFECT] Cleanup triggered for roomId:", roomId);
+      isMounted = false; 
+      
+      roomUnsubscribe();
+      offerCandidatesUnsubscribe();
+      answerCandidatesUnsubscribe();
+      cleanup(); 
+      console.log("[WebRTC EFFECT] Unsubscribed all listeners and called cleanup for roomId:", roomId);
+    };
+  }, [roomId, userId, setupPeerConnection, startLocalStream, roomDocRef, offerCandidatesCollectionRef, answerCandidatesCollectionRef]);
+
+  const handleToggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setIsMuted(prev => !prev);
+    }
+  };
+
+  const handleToggleVideo = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setIsVideoOff(prev => !prev);
+    }
+  };
+
+  const handleLocalHangUp = async () => {
+    console.log("[WebRTC] User initiated hang up for room:", roomId);
+    onHangUp(); 
+  };
+
+  const handleShareLink = async () => {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'; 
+    const roomLink = `${appUrl}/meeting?roomId=${roomId}`;
+    try {
+      await navigator.clipboard.writeText(roomLink);
+      toast({
+        title: "Link Copied!",
+        description: "Video call room link copied to clipboard.",
+      });
+    } catch (err) {
+      console.error('Failed to copy room link: ', err);
+      toast({
+        variant: "destructive",
+        title: "Copy Failed",
+        description: "Could not copy room link to clipboard.",
+      });
+    }
+  };
+
+  const isLoadingStatus = callStatus.startsWith("Initializing") || 
+                          callStatus.startsWith("Requesting media") || 
+                          callStatus.startsWith("Setting up") || 
+                          callStatus.startsWith("Checking room") || 
+                          callStatus.startsWith("Creating offer") || 
+                          callStatus.startsWith("Offer created") || 
+                          callStatus.startsWith("Received offer") || 
+                          callStatus.startsWith("Setting remote") || 
+                          callStatus.startsWith("Setting local") || 
+                          callStatus.startsWith("Creating answer") ||
+                          callStatus.startsWith("Sending answer");
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg shadow-md bg-card">
+      <p className="text-sm text-center text-muted-foreground">
+        Room ID: <span className="font-semibold text-primary">{roomId}</span> | Status: {isLoadingStatus && <Loader2 className="inline h-4 w-4 animate-spin mr-1" />} {callStatus}
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <h3 className="text-center font-medium mb-2">Your Video</h3>
+          <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-auto rounded-md bg-muted aspect-video object-cover transform scale-x-[-1]" />
         </div>
-    );
-}
+        <div>
+          <h3 className="text-center font-medium mb-2">Remote Video</h3>
+          <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-auto rounded-md bg-muted aspect-video object-cover transform scale-x-[-1]" />
+        </div>
+      </div>
+      <div className="flex justify-center space-x-2 md:space-x-3 mt-4">
+        <Button onClick={handleToggleMute} variant={isMuted ? "secondary" : "outline"} size="icon" aria-label={isMuted ? "Unmute" : "Mute"}>
+          {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        </Button>
+        <Button onClick={handleToggleVideo} variant={isVideoOff ? "secondary" : "outline"} size="icon" aria-label={isVideoOff ? "Turn Video On" : "Turn Video Off"}>
+          {isVideoOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
+        </Button>
+        <Button onClick={handleShareLink} variant="outline" size="icon" aria-label="Share Room Link">
+          <Share2 className="h-5 w-5" />
+        </Button>
+        <Button onClick={handleLocalHangUp} variant="destructive" size="icon" aria-label="Hang Up">
+          <PhoneOff className="h-5 w-5" />
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+export default VideoCall;
