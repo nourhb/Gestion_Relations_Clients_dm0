@@ -147,7 +147,8 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
           setLocalStream(dummyStream);
         }
       }
-    }, []);
+    }
+  }, []);
 
     // 1. Effect for acquiring local media
     useEffect(() => {
