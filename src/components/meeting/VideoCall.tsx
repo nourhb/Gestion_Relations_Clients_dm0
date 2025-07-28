@@ -192,89 +192,79 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
             const offerDescription = callDocSnap.data()?.offer;
 
             if (isAdmin) {
-                // Admin logic: Create offer if missing or invalid
-                if (callDocSnap.exists() && (!offerDescription || !offerDescription.type || !offerDescription.sdp)) {
-                    console.warn('[WebRTC] Admin detected invalid offer in existing room doc. Deleting doc to reset.');
-                    await deleteDoc(callDocRef);
-                }
+                // Admin logic: Always create a new offer when joining
+                console.log('[WebRTC] Admin joining - creating new offer');
+                setConnectionStatus("Creating offer...");
+                const peerConnection = new RTCPeerConnection(servers);
+                pc.current = peerConnection;
 
-                // Re-fetch after possible deletion
-                const freshCallDocSnap = await getDoc(callDocRef);
-                const freshOfferDescription = freshCallDocSnap.data()?.offer;
+                // Add local tracks
+                localStream.getTracks().forEach(track => {
+                    console.log('[WebRTC] Adding local track:', track.kind);
+                    peerConnection.addTrack(track, localStream);
+                });
 
-                if (!freshCallDocSnap.exists() || !freshOfferDescription || !freshOfferDescription.type || !freshOfferDescription.sdp) {
-                    // Create offer as admin
-                    setConnectionStatus("Creating offer...");
-                    const peerConnection = new RTCPeerConnection(servers);
-                    pc.current = peerConnection;
+                // Handle remote stream
+                peerConnection.ontrack = (event) => {
+                    console.log('[WebRTC] Received remote track');
+                    if (remoteVideoRef.current) {
+                        remoteVideoRef.current.srcObject = event.streams[0];
+                    }
+                    setRemoteStream(event.streams[0]);
+                };
 
-                    // Add local tracks
-                    localStream.getTracks().forEach(track => {
-                        console.log('[WebRTC] Adding local track:', track.kind);
-                        peerConnection.addTrack(track, localStream);
-                    });
-
-                    // Handle remote stream
-                    peerConnection.ontrack = (event) => {
-                        console.log('[WebRTC] Received remote track');
-                        if (remoteVideoRef.current) {
-                            remoteVideoRef.current.srcObject = event.streams[0];
-                        }
-                        setRemoteStream(event.streams[0]);
-                    };
-
-                    // Collect ICE candidates
-                    peerConnection.onicecandidate = async (event) => {
-                        if (event.candidate) {
+                // Collect ICE candidates
+                peerConnection.onicecandidate = async (event) => {
+                    if (event.candidate) {
+                        try {
                             console.log('[WebRTC] Sending ICE candidate');
                             await addDoc(collection(callDocRef, 'offerCandidates'), event.candidate.toJSON());
+                        } catch (error) {
+                            console.warn('[WebRTC] Failed to send ICE candidate:', error);
                         }
-                    };
-
-                    // Create and send offer
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-                    
-                    try {
-                        await setDoc(callDocRef, { 
-                            offer: { sdp: offer.sdp, type: offer.type },
-                            participants: { admin: true }
-                        }, { merge: true });
-                        setConnectionStatus("Offer created, waiting for answer...");
-                        console.log('[WebRTC] Offer created and sent');
-                    } catch (err) {
-                        console.error('[WebRTC] Error creating offer:', err);
-                        setConnectionStatus("Failed to create offer");
                     }
+                };
 
-                    // Listen for answer
-                    roomUnsubscribe = onSnapshot(callDocRef, snapshot => {
-                        if (!isComponentMounted || !pc.current) return;
-                        const data = snapshot.data();
-                        if (data?.answer && !pc.current.remoteDescription) {
-                            console.log('[WebRTC] Received answer');
-                            const answerDesc = new RTCSessionDescription(data.answer);
-                            pc.current.setRemoteDescription(answerDesc);
-                            setConnectionStatus("Answer received, connecting...");
+                // Create and send offer
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                try {
+                    await setDoc(callDocRef, { 
+                        offer: { sdp: offer.sdp, type: offer.type },
+                        participants: { admin: true },
+                        timestamp: new Date().toISOString()
+                    }, { merge: true });
+                    setConnectionStatus("Offer created, waiting for answer...");
+                    console.log('[WebRTC] Offer created and sent');
+                } catch (err) {
+                    console.error('[WebRTC] Error creating offer:', err);
+                    setConnectionStatus("Failed to create offer");
+                }
+
+                // Listen for answer
+                roomUnsubscribe = onSnapshot(callDocRef, snapshot => {
+                    if (!isComponentMounted || !pc.current) return;
+                    const data = snapshot.data();
+                    if (data?.answer && !pc.current.remoteDescription) {
+                        console.log('[WebRTC] Received answer');
+                        const answerDesc = new RTCSessionDescription(data.answer);
+                        pc.current.setRemoteDescription(answerDesc);
+                        setConnectionStatus("Answer received, connecting...");
+                    }
+                });
+
+                // Listen for answer ICE candidates
+                answerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'answerCandidates'), snapshot => {
+                    if (!isComponentMounted || !pc.current) return;
+                    snapshot.docChanges().forEach(change => {
+                        if (change.type === 'added') {
+                            const candidate = new RTCIceCandidate(change.doc.data());
+                            pc.current?.addIceCandidate(candidate);
+                            console.log('[WebRTC] Added answer ICE candidate');
                         }
                     });
-
-                    // Listen for answer ICE candidates
-                    answerCandidatesUnsubscribe = onSnapshot(collection(callDocRef, 'answerCandidates'), snapshot => {
-                        if (!isComponentMounted || !pc.current) return;
-                        snapshot.docChanges().forEach(change => {
-                            if (change.type === 'added') {
-                                const candidate = new RTCIceCandidate(change.doc.data());
-                                pc.current?.addIceCandidate(candidate);
-                                console.log('[WebRTC] Added answer ICE candidate');
-                            }
-                        });
-                    });
-
-                } else {
-                    console.log('[WebRTC] Valid offer already exists');
-                    setConnectionStatus("Valid offer exists");
-                }
+                });
             } else {
                 // Guest logic: Wait for offer
                 if (!offerDescription || !offerDescription.type || !offerDescription.sdp) {
@@ -308,8 +298,12 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                 // Collect ICE candidates
                 peerConnection.onicecandidate = async (event) => {
                     if (event.candidate) {
-                        console.log('[WebRTC] Sending ICE candidate');
-                        await addDoc(collection(callDocRef, 'answerCandidates'), event.candidate.toJSON());
+                        try {
+                            console.log('[WebRTC] Sending ICE candidate');
+                            await addDoc(collection(callDocRef, 'answerCandidates'), event.candidate.toJSON());
+                        } catch (error) {
+                            console.warn('[WebRTC] Failed to send ICE candidate:', error);
+                        }
                     }
                 };
 
@@ -321,7 +315,8 @@ export default function VideoCall({ userId, roomId, onHangUp }: VideoCallProps) 
                     
                     await updateDoc(callDocRef, { 
                         answer: { sdp: answer.sdp, type: answer.type },
-                        participants: { guest: true }
+                        participants: { guest: true },
+                        timestamp: new Date().toISOString()
                     });
                     
                     setConnectionStatus("Answer sent, connecting...");
