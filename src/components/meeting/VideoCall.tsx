@@ -61,8 +61,28 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
             console.log('Local video playing successfully');
           }).catch(error => {
             console.error('Local video play failed:', error);
+            // Retry playing the video
+            setTimeout(() => {
+              localVideoRef.current?.play().catch(console.error);
+            }, 1000);
           });
         }
+
+        // Add event listeners to keep video alive
+        localVideoRef.current.onended = () => {
+          console.log('Local video ended, restarting...');
+          localVideoRef.current?.play().catch(console.error);
+        };
+
+        localVideoRef.current.onpause = () => {
+          console.log('Local video paused, resuming...');
+          localVideoRef.current?.play().catch(console.error);
+        };
+
+        localVideoRef.current.onerror = () => {
+          console.log('Local video error, restarting stream...');
+          getMediaStream();
+        };
       }
       
       localStreamRef.current = stream;
@@ -106,8 +126,28 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
           playPromise.then(() => {
             console.log('Remote video playing successfully');
             setStatus("Connected!");
+            
+            // Add event listeners to keep remote video alive
+            remoteVideoRef.current!.onended = () => {
+              console.log('Remote video ended, restarting...');
+              remoteVideoRef.current?.play().catch(console.error);
+            };
+
+            remoteVideoRef.current!.onpause = () => {
+              console.log('Remote video paused, resuming...');
+              remoteVideoRef.current?.play().catch(console.error);
+            };
+
+            remoteVideoRef.current!.onerror = () => {
+              console.log('Remote video error, attempting to restart...');
+              remoteVideoRef.current?.play().catch(console.error);
+            };
           }).catch(error => {
             console.error('Remote video play failed:', error);
+            // Retry playing remote video
+            setTimeout(() => {
+              remoteVideoRef.current?.play().catch(console.error);
+            }, 1000);
           });
         }
       }
@@ -270,8 +310,41 @@ const VideoCall: React.FC<VideoCallProps> = ({ userId, roomId, onHangUp }) => {
       }
     });
 
+    // Periodic stream health check
+    const streamHealthCheck = setInterval(() => {
+      if (localStreamRef.current) {
+        const tracks = localStreamRef.current.getTracks();
+        const videoTrack = tracks.find(track => track.kind === 'video');
+        const audioTrack = tracks.find(track => track.kind === 'audio');
+        
+        // Check if tracks are still active
+        if (videoTrack && videoTrack.readyState === 'ended') {
+          console.log('Video track ended, restarting stream...');
+          getMediaStream();
+        }
+        
+        if (audioTrack && audioTrack.readyState === 'ended') {
+          console.log('Audio track ended, restarting stream...');
+          getMediaStream();
+        }
+        
+        // Check if video element is playing
+        if (localVideoRef.current && localVideoRef.current.paused) {
+          console.log('Local video is paused, restarting...');
+          localVideoRef.current.play().catch(console.error);
+        }
+      }
+      
+      // Check remote video
+      if (remoteVideoRef.current && remoteVideoRef.current.paused && remoteVideoRef.current.srcObject) {
+        console.log('Remote video is paused, restarting...');
+        remoteVideoRef.current.play().catch(console.error);
+      }
+    }, 3000);
+
     return () => {
       unsubscribe();
+      clearInterval(streamHealthCheck);
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
       }
