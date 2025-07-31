@@ -138,8 +138,15 @@ function AdminRequestsPageContent() {
   const handleGenerateMeetingLink = async (request: ServiceRequestAdminView) => {
     setIsGeneratingLink(request.id);
     startTransition(async () => {
-        // Generate a simple Google Meet link without API
-        const meetCode = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        // Generate a Google Meet link with proper format (3 groups of 3-4 characters)
+        const generateMeetCode = () => {
+          const chars = 'abcdefghijklmnopqrstuvwxyz';
+          const group1 = Array.from({length: 3}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+          const group2 = Array.from({length: 4}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+          const group3 = Array.from({length: 3}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+          return `${group1}-${group2}-${group3}`;
+        };
+        const meetCode = generateMeetCode();
         const meetingUrl = `https://meet.google.com/${meetCode}`;
         
                  // Update the request with the new meeting URL
