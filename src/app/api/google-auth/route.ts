@@ -36,8 +36,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ 
         success: true, 
         message: 'Authentication successful',
-        // Don't return tokens in production - store them securely instead
-        tokens: process.env.NODE_ENV === 'development' ? tokens : undefined
+        // Temporarily return tokens for setup - remove this in production
+        tokens: tokens,
+        refreshToken: tokens.refresh_token
       });
     }
 
