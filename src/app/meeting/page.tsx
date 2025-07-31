@@ -25,10 +25,11 @@ const MeetingPageContent = () => {
   const [serviceRequestId, setServiceRequestId] = useState('');
   const [showBookingForm, setShowBookingForm] = useState(false);
 
-  // Check for service request ID or meet link in URL params
+  // Check for service request ID, meet link, or room ID in URL params
   useEffect(() => {
     const urlServiceRequestId = searchParams.get('serviceRequestId');
     const urlMeetLink = searchParams.get('meetLink');
+    const urlRoomId = searchParams.get('roomId');
     
     if (urlServiceRequestId) {
       setServiceRequestId(urlServiceRequestId);
@@ -37,6 +38,12 @@ const MeetingPageContent = () => {
     
     if (urlMeetLink) {
       setMeetLink(decodeURIComponent(urlMeetLink));
+      setBookingComplete(true);
+    }
+    
+    if (urlRoomId) {
+      // Handle custom meeting room
+      setMeetLink(`Meeting Room: ${urlRoomId}`);
       setBookingComplete(true);
     }
   }, [searchParams]);
@@ -136,6 +143,9 @@ const MeetingPageContent = () => {
 
   // Show meeting details if booking is complete
   if (bookingComplete && meetLink) {
+    const isCustomMeeting = meetLink.startsWith('Meeting Room:');
+    const isGoogleMeet = meetLink.startsWith('https://meet.google.com/');
+    
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <Card className="w-full max-w-lg">
@@ -143,18 +153,25 @@ const MeetingPageContent = () => {
             <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
-            <CardTitle>Consultation Scheduled!</CardTitle>
+            <CardTitle>
+              {isCustomMeeting ? 'Meeting Room Ready!' : 'Consultation Scheduled!'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="text-center space-y-6">
             <p className="text-muted-foreground">
-              Your Google Meet consultation has been successfully scheduled. You can join the meeting using the link below.
+              {isCustomMeeting 
+                ? 'Your meeting room is ready. You can join the consultation using the information below.'
+                : 'Your Google Meet consultation has been successfully scheduled. You can join the meeting using the link below.'
+              }
             </p>
             
             <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-sm font-medium text-gray-700 mb-2">Google Meet Link:</p>
+              <p className="text-sm font-medium text-gray-700 mb-2">
+                {isCustomMeeting ? 'Meeting Room:' : 'Google Meet Link:'}
+              </p>
               <div className="flex items-center space-x-2">
                 <Input 
-                  value={meetLink} 
+                  value={isCustomMeeting ? meetLink.replace('Meeting Room: ', '') : meetLink} 
                   readOnly 
                   className="text-sm"
                 />
@@ -176,7 +193,7 @@ const MeetingPageContent = () => {
                 size="lg"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
-                Join Google Meet
+                {isCustomMeeting ? 'Join Meeting Room' : 'Join Google Meet'}
               </Button>
               
               <div className="flex space-x-2">
@@ -207,6 +224,7 @@ const MeetingPageContent = () => {
                 <li>• You'll receive a confirmation email with meeting details</li>
                 <li>• A reminder will be sent 10 minutes before the meeting</li>
                 <li>• Please join the meeting on time</li>
+                {isCustomMeeting && <li>• This is a custom meeting room - no external service required</li>}
               </ul>
             </div>
           </CardContent>
