@@ -72,22 +72,37 @@ const MeetingPageContent = () => {
 
   const handleJoinMeeting = () => {
     if (meetLink) {
-      window.open(meetLink, '_blank');
+      if (meetLink.startsWith('Meeting Room:')) {
+        // For custom meetings, just show a success message
+        toast({
+          title: 'Meeting Room Joined!',
+          description: 'You are now in the meeting room. The consultation will begin shortly.',
+        });
+      } else if (meetLink.startsWith('https://')) {
+        // For external links (Google Meet), open in new tab
+        window.open(meetLink, '_blank');
+      }
     }
   };
 
   const handleCopyMeetLink = () => {
     if (meetLink) {
-      navigator.clipboard.writeText(meetLink).then(() => {
+      const textToCopy = meetLink.startsWith('Meeting Room:') 
+        ? `Meeting Room: ${meetLink.replace('Meeting Room: ', '')}`
+        : meetLink;
+      
+      navigator.clipboard.writeText(textToCopy).then(() => {
         toast({
-          title: 'Meet link copied!',
-          description: 'Google Meet link has been copied to clipboard.'
+          title: 'Meeting info copied!',
+          description: meetLink.startsWith('Meeting Room:') 
+            ? 'Meeting room information has been copied to clipboard.'
+            : 'Google Meet link has been copied to clipboard.'
         });
       }).catch(() => {
         toast({
           variant: 'destructive',
           title: 'Copy Failed',
-          description: 'Failed to copy meet link. Please try again.'
+          description: 'Failed to copy meeting information. Please try again.'
         });
       });
     }
@@ -95,18 +110,24 @@ const MeetingPageContent = () => {
 
   const handleShareMeetLink = () => {
     if (meetLink) {
-      const shareText = `Join my Google Meet consultation: ${meetLink}`;
+      const isCustomMeeting = meetLink.startsWith('Meeting Room:');
+      const shareText = isCustomMeeting 
+        ? `Join my consultation meeting room: ${meetLink}`
+        : `Join my Google Meet consultation: ${meetLink}`;
+      
       if (navigator.share) {
         navigator.share({
-          title: 'Google Meet Consultation',
+          title: isCustomMeeting ? 'Consultation Meeting' : 'Google Meet Consultation',
           text: shareText,
-          url: meetLink
+          url: isCustomMeeting ? window.location.href : meetLink
         });
       } else {
         navigator.clipboard.writeText(shareText).then(() => {
           toast({
-            title: 'Meet link copied!',
-            description: 'Meet link has been copied to clipboard.'
+            title: 'Meeting info copied!',
+            description: isCustomMeeting 
+              ? 'Meeting room information has been copied to clipboard.'
+              : 'Meet link has been copied to clipboard.'
           });
         });
       }
