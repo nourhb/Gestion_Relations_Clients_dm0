@@ -67,7 +67,7 @@ export async function submitRequest(
   
   try {
     const validatedData = actionFormSchema.parse(values);
-    const { serviceType, selectedSlots, paymentProof, ...restOfData } = validatedData;
+    const { serviceType, meetingType, selectedSlots, paymentProof, ...restOfData } = validatedData;
     
     // Server-side validation of business logic
     if (selectedSlots.some(slot => isToday(new Date(slot.date)))) {
