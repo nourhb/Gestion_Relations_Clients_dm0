@@ -142,12 +142,11 @@ function AdminRequestsPageContent() {
         const meetCode = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
         const meetingUrl = `https://meet.google.com/${meetCode}`;
         
-        // Update the request with the new meeting URL
-        const result = await updateServiceRequestAdminDetails(
-          request.id,
-          request.status,
-          meetingUrl
-        );
+                 // Update the request with the new meeting URL
+         const result = await updateServiceRequestAdminDetails(
+           request.id,
+           { meetingUrl: meetingUrl }
+         );
         
         if (result.success) {
             toast({ 
