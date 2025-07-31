@@ -233,7 +233,7 @@ export async function seedServiceRequests(): Promise<{ success: boolean, error?:
       // 1. Create Service Request
       batch.set(serviceRequestRef, {
         userId: user.userId,
-        providerId: SERVICE_PROVIDER_UID,
+        serviceProviderUid: SERVICE_PROVIDER_UID,
         name: user.name,
         surname: user.surname,
         email: user.email,

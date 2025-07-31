@@ -107,6 +107,7 @@ export async function submitRequest(
     const dataToStore = {
       ...restOfData,
       userName,
+      userId: `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Generate temporary user ID for guests
       serviceType,
       meetingType,
       selectedSlots,
@@ -144,7 +145,7 @@ export async function submitRequest(
         
         const meetingResult = await scheduleGoogleMeetConsultation(
           requestId,
-          'temp_user_id', // Will be updated when user registers
+          dataToStore.userId, // Use the generated user ID
           userName,
           validatedData.email,
           startDateTime,

@@ -139,7 +139,26 @@ function AdminRequestsPageContent() {
     setIsGeneratingLink(request.id);
     startTransition(async () => {
         // Use the new Google Meet consultation scheduling
-        const result = await scheduleWebRtcConsultation(request.id, request.userId, request.userName);
+        if (!request.userId || request.userId.trim() === '') {
+          toast({ 
+            variant: "destructive", 
+            title: "فشل في إنشاء رابط Google Meet", 
+            description: "معرف المستخدم مطلوب لإنشاء رابط الاجتماع" 
+          });
+          setIsGeneratingLink(null);
+          return;
+        }
+        
+        const result = await scheduleGoogleMeetConsultation(
+          request.id,
+          request.userId,
+          request.userName,
+          request.email,
+          new Date().toISOString(), // Use current time as placeholder
+          new Date(Date.now() + 40 * 60000).toISOString(), // 40 minutes from now
+          `استشارة مع ${request.userName}`,
+          `استشارة في التسويق الرقمي`
+        );
         if (result.success && (result.meetLink || result.roomId)) {
             const meetingUrl = result.meetLink || result.roomId;
             toast({ 
