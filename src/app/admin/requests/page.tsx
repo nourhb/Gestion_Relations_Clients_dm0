@@ -138,14 +138,14 @@ function AdminRequestsPageContent() {
   const handleGenerateMeetingLink = async (request: ServiceRequestAdminView) => {
     setIsGeneratingLink(request.id);
     startTransition(async () => {
-        // Generate a simple meeting link that works without Google API
-        const generateMeetingId = () => {
+        // Generate a Jitsi Meet link (free, no API required)
+        const generateJitsiMeetingId = () => {
           const timestamp = Date.now().toString(36);
           const random = Math.random().toString(36).substring(2, 8);
-          return `${timestamp}-${random}`;
+          return `${timestamp}${random}`.substring(0, 12); // 12 character ID like the original
         };
-        const meetingId = generateMeetingId();
-        const meetingUrl = `https://gestion-relations-clients-dm0-4.onrender.com/meeting?roomId=${meetingId}`;
+        const meetingId = generateJitsiMeetingId();
+        const meetingUrl = `https://meet.jit.si/ConsultationRoom-${meetingId}`;
         
                  // Update the request with the new meeting URL
          const result = await updateServiceRequestAdminDetails(
@@ -182,8 +182,11 @@ function AdminRequestsPageContent() {
   };
 
   const handleJoinCall = (meetingUrl: string) => {
-    // Check if it's a Google Meet link or our custom meeting link
-    if (meetingUrl.startsWith('https://meet.google.com/')) {
+    // Check if it's a Jitsi Meet link, Google Meet link, or legacy room ID
+    if (meetingUrl.startsWith('https://meet.jit.si/')) {
+      // Open Jitsi Meet link in new tab
+      window.open(meetingUrl, '_blank');
+    } else if (meetingUrl.startsWith('https://meet.google.com/')) {
       // Open Google Meet link in new tab
       window.open(meetingUrl, '_blank');
     } else if (meetingUrl.startsWith('https://gestion-relations-clients-dm0-4.onrender.com/meeting')) {
@@ -442,7 +445,9 @@ function AdminRequestsPageContent() {
                                                     <DropdownMenuItem onClick={() => handleJoinCall(request.meetingUrl!)} disabled={isPending}>
                                                         <Video className="ml-2 h-4 w-4" />
                                                                                                                  <span>
-                                                           {request.meetingUrl.startsWith('https://meet.google.com/') 
+                                                           {request.meetingUrl.startsWith('https://meet.jit.si/') 
+                                                             ? 'فتح Jitsi Meet' 
+                                                             : request.meetingUrl.startsWith('https://meet.google.com/') 
                                                              ? 'فتح Google Meet' 
                                                              : request.meetingUrl.startsWith('https://gestion-relations-clients-dm0-4.onrender.com/meeting')
                                                              ? 'الانضمام للاجتماع'

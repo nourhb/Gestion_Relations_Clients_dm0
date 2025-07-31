@@ -78,8 +78,11 @@ const MeetingPageContent = () => {
           title: 'Meeting Room Joined!',
           description: 'You are now in the meeting room. The consultation will begin shortly.',
         });
+      } else if (meetLink.startsWith('https://meet.jit.si/')) {
+        // For Jitsi Meet links, open in new tab
+        window.open(meetLink, '_blank');
       } else if (meetLink.startsWith('https://')) {
-        // For external links (Google Meet), open in new tab
+        // For other external links (Google Meet), open in new tab
         window.open(meetLink, '_blank');
       }
     }
@@ -96,6 +99,8 @@ const MeetingPageContent = () => {
           title: 'Meeting info copied!',
           description: meetLink.startsWith('Meeting Room:') 
             ? 'Meeting room information has been copied to clipboard.'
+            : meetLink.startsWith('https://meet.jit.si/')
+            ? 'Jitsi Meet link has been copied to clipboard.'
             : 'Google Meet link has been copied to clipboard.'
         });
       }).catch(() => {
@@ -111,13 +116,16 @@ const MeetingPageContent = () => {
   const handleShareMeetLink = () => {
     if (meetLink) {
       const isCustomMeeting = meetLink.startsWith('Meeting Room:');
+      const isJitsiMeet = meetLink.startsWith('https://meet.jit.si/');
       const shareText = isCustomMeeting 
         ? `Join my consultation meeting room: ${meetLink}`
+        : isJitsiMeet
+        ? `Join my Jitsi Meet consultation: ${meetLink}`
         : `Join my Google Meet consultation: ${meetLink}`;
       
       if (navigator.share) {
         navigator.share({
-          title: isCustomMeeting ? 'Consultation Meeting' : 'Google Meet Consultation',
+          title: isCustomMeeting ? 'Consultation Meeting' : isJitsiMeet ? 'Jitsi Meet Consultation' : 'Google Meet Consultation',
           text: shareText,
           url: isCustomMeeting ? window.location.href : meetLink
         });
@@ -127,6 +135,8 @@ const MeetingPageContent = () => {
             title: 'Meeting info copied!',
             description: isCustomMeeting 
               ? 'Meeting room information has been copied to clipboard.'
+              : isJitsiMeet
+              ? 'Jitsi Meet link has been copied to clipboard.'
               : 'Meet link has been copied to clipboard.'
           });
         });
@@ -165,6 +175,7 @@ const MeetingPageContent = () => {
   // Show meeting details if booking is complete
   if (bookingComplete && meetLink) {
     const isCustomMeeting = meetLink.startsWith('Meeting Room:');
+    const isJitsiMeet = meetLink.startsWith('https://meet.jit.si/');
     const isGoogleMeet = meetLink.startsWith('https://meet.google.com/');
     
     return (
@@ -175,20 +186,22 @@ const MeetingPageContent = () => {
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <CardTitle>
-              {isCustomMeeting ? 'Meeting Room Ready!' : 'Consultation Scheduled!'}
+              {isCustomMeeting ? 'Meeting Room Ready!' : isJitsiMeet ? 'Jitsi Meet Ready!' : 'Consultation Scheduled!'}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-center space-y-6">
             <p className="text-muted-foreground">
               {isCustomMeeting 
                 ? 'Your meeting room is ready. You can join the consultation using the information below.'
+                : isJitsiMeet
+                ? 'Your Jitsi Meet consultation has been successfully scheduled. You can join the meeting using the link below.'
                 : 'Your Google Meet consultation has been successfully scheduled. You can join the meeting using the link below.'
               }
             </p>
             
             <div className="bg-gray-50 p-4 rounded-lg">
               <p className="text-sm font-medium text-gray-700 mb-2">
-                {isCustomMeeting ? 'Meeting Room:' : 'Google Meet Link:'}
+                {isCustomMeeting ? 'Meeting Room:' : isJitsiMeet ? 'Jitsi Meet Link:' : 'Google Meet Link:'}
               </p>
               <div className="flex items-center space-x-2">
                 <Input 
@@ -214,7 +227,7 @@ const MeetingPageContent = () => {
                 size="lg"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
-                {isCustomMeeting ? 'Join Meeting Room' : 'Join Google Meet'}
+                {isCustomMeeting ? 'Join Meeting Room' : isJitsiMeet ? 'Join Jitsi Meet' : 'Join Google Meet'}
               </Button>
               
               <div className="flex space-x-2">
@@ -246,6 +259,7 @@ const MeetingPageContent = () => {
                 <li>• A reminder will be sent 10 minutes before the meeting</li>
                 <li>• Please join the meeting on time</li>
                 {isCustomMeeting && <li>• This is a custom meeting room - no external service required</li>}
+                {isJitsiMeet && <li>• Jitsi Meet is free and doesn't require any account</li>}
               </ul>
             </div>
           </CardContent>
