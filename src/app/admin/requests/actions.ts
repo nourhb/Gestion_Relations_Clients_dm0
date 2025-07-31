@@ -53,7 +53,7 @@ export async function fetchProviderServiceRequests(providerUid: string): Promise
 
   try {
     const requestsCollectionRef = collection(db, "serviceRequests");
-    const q = query(requestsCollectionRef, where("providerId", "==", providerUid));
+    const q = query(requestsCollectionRef, where("serviceProviderUid", "==", providerUid));
     const querySnapshot = await getDocs(q);
 
     const requests: ServiceRequestAdminView[] = [];
