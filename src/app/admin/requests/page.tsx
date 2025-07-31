@@ -17,7 +17,7 @@ import {
   deleteServiceRequests, // New action
   type ServiceRequestAdminView 
 } from "./actions";
-import { scheduleWebRtcConsultation, scheduleGoogleMeetConsultation } from "@/app/meeting/actions";
+import { scheduleWebRtcConsultation } from "@/app/meeting/actions";
 import { 
   Loader2, AlertCircle, Users, Edit, Save, Link as LinkIconLucide, MoreHorizontal, 
   CheckCircle, XCircle, ClockIcon, RefreshCcw, ExternalLink, FileImage, 
@@ -138,39 +138,28 @@ function AdminRequestsPageContent() {
   const handleGenerateMeetingLink = async (request: ServiceRequestAdminView) => {
     setIsGeneratingLink(request.id);
     startTransition(async () => {
-        // Use the new Google Meet consultation scheduling
-        if (!request.userId || request.userId.trim() === '') {
-          toast({ 
-            variant: "destructive", 
-            title: "فشل في إنشاء رابط Google Meet", 
-            description: "معرف المستخدم مطلوب لإنشاء رابط الاجتماع" 
-          });
-          setIsGeneratingLink(null);
-          return;
-        }
+        // Generate a simple Google Meet link without API
+        const meetCode = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const meetingUrl = `https://meet.google.com/${meetCode}`;
         
-        const result = await scheduleGoogleMeetConsultation(
+        // Update the request with the new meeting URL
+        const result = await updateServiceRequestAdminDetails(
           request.id,
-          request.userId,
-          request.userName,
-          request.email,
-          new Date().toISOString(), // Use current time as placeholder
-          new Date(Date.now() + 40 * 60000).toISOString(), // 40 minutes from now
-          `استشارة مع ${request.userName}`,
-          `استشارة في التسويق الرقمي`
+          request.status,
+          meetingUrl
         );
-        if (result.success && (result.meetLink || result.roomId)) {
-            const meetingUrl = result.meetLink || result.roomId;
+        
+        if (result.success) {
             toast({ 
               title: "تم إنشاء رابط Google Meet", 
-              description: `تم إنشاء رابط الاجتماع بنجاح` 
+              description: `تم إنشاء رابط الاجتماع: ${meetingUrl}` 
             });
             if (editingRequest?.id === request.id) {
               setEditingRequest(prev => prev ? {...prev, meetingUrl: meetingUrl } : null);
             }
             await fetchRequests(); 
         } else {
-            toast({ variant: "destructive", title: "فشل في إنشاء رابط Google Meet", description: result.message });
+            toast({ variant: "destructive", title: "فشل في إنشاء رابط Google Meet", description: result.error || "حدث خطأ أثناء إنشاء الرابط" });
         }
         setIsGeneratingLink(null);
     });
