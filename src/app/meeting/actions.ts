@@ -2,70 +2,240 @@
 "use server";
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, Timestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
 import { z } from "zod";
+import { emailService } from '@/lib/email';
+import GoogleCalendarService from '@/lib/google-calendar';
 
 const scheduleSchema = z.object({
-  userId: z.string(),
-  userName: z.string(),
-  serviceRequestId: z.string(),
+  userId: z.string().min(1, "User ID is required"),
+  userName: z.string().min(1, "User name is required"),
+  userEmail: z.string().email("Valid email is required"),
+  serviceRequestId: z.string().min(1, "Service request ID is required"),
+  startDateTime: z.string().min(1, "Start date time is required"),
+  endDateTime: z.string().min(1, "End date time is required"),
+  summary: z.string().optional(),
+  description: z.string().optional(),
 });
 
 interface ScheduleResult {
   success: boolean;
   message: string;
-  roomId?: string;
+  meetLink?: string;
   consultId?: string;
+  eventId?: string;
 }
 
+// Initialize Google Calendar service
+const googleCalendarService = new GoogleCalendarService({
+  clientId: process.env.GOOGLE_CLIENT_ID!,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  redirectUri: process.env.GOOGLE_REDIRECT_URI!,
+  refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+});
+
+export async function scheduleGoogleMeetConsultation(
+    serviceRequestId: string, 
+    userId: string, 
+    userName: string,
+    userEmail: string,
+    startDateTime: string,
+    endDateTime: string,
+    summary?: string,
+    description?: string
+): Promise<ScheduleResult> {
+  const validation = scheduleSchema.safeParse({ 
+    userId, 
+    userName, 
+    userEmail,
+    serviceRequestId,
+    startDateTime,
+    endDateTime,
+    summary,
+    description
+  });
+
+  if (!validation.success) {
+    console.error("Validation error:", validation.error);
+    return { success: false, message: "بيانات الجدولة المقدمة غير صالحة." };
+  }
+  
+  const validatedData = validation.data;
+
+  try {
+    // Create Google Calendar event with Meet link
+    const eventResult = await googleCalendarService.createEvent({
+      summary: validatedData.summary || `Consultation with ${validatedData.userName}`,
+      description: validatedData.description || `Digital marketing consultation for service request ${validatedData.serviceRequestId}`,
+      startDateTime: validatedData.startDateTime,
+      endDateTime: validatedData.endDateTime,
+      attendeeEmail: validatedData.userEmail,
+      timeZone: 'UTC',
+    });
+
+    if (!eventResult.success) {
+      return {
+        success: false,
+        message: eventResult.error || "فشل في إنشاء حدث التقويم.",
+      };
+    }
+    
+    // Update the original service request with the meeting details
+    const requestDocRef = doc(db, "serviceRequests", validatedData.serviceRequestId);
+    await updateDoc(requestDocRef, {
+      meetingUrl: eventResult.meetLink,
+      googleEventId: eventResult.eventId,
+      status: "confirmed",
+      consultationTime: new Date(validatedData.startDateTime),
+      updatedAt: serverTimestamp(),
+    });
+
+    // Create a record in 'googleMeetConsults' for history/logging
+    const consultsCollection = collection(db, "googleMeetConsults");
+    const newConsultDoc = await addDoc(consultsCollection, {
+      serviceRequestId: validatedData.serviceRequestId,
+      userId: validatedData.userId,
+      userName: validatedData.userName,
+      userEmail: validatedData.userEmail,
+      providerId: "eQwXAu9jw7cL0YtMHA3WuQznKfg1", // The Admin/Provider UID
+      providerName: "DigitalMen0 دعم",
+      googleEventId: eventResult.eventId,
+      meetLink: eventResult.meetLink,
+      startTime: validatedData.startDateTime,
+      endTime: validatedData.endDateTime,
+      status: 'scheduled', // scheduled, completed, cancelled
+      createdAt: serverTimestamp(),
+    });
+
+    console.log("Google Meet consultation scheduled successfully:", {
+      meetLink: eventResult.meetLink,
+      eventId: eventResult.eventId,
+      consultId: newConsultDoc.id,
+      serviceRequestId: validatedData.serviceRequestId
+    });
+
+    // Send consultation scheduled email
+    try {
+      const emailResult = await emailService.sendConsultationScheduled({
+        name: validatedData.userName,
+        meetLink: eventResult.meetLink || '',
+        consultId: newConsultDoc.id,
+        serviceRequestId: validatedData.serviceRequestId,
+        consultationTime: validatedData.startDateTime,
+        email: validatedData.userEmail,
+      });
+
+      if (emailResult.success) {
+        console.log('Google Meet consultation email sent successfully:', emailResult.messageId);
+      } else {
+        console.warn('Consultation scheduled, but failed to send email:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.warn("Consultation scheduled, but failed to send email:", emailError);
+      // Don't block the consultation scheduling if email fails
+    }
+
+    return {
+      success: true,
+      message: `تم جدولة استشارة Google Meet بنجاح.`,
+      meetLink: eventResult.meetLink,
+      eventId: eventResult.eventId,
+      consultId: newConsultDoc.id,
+    };
+  } catch (error: any) {
+    console.error("Error scheduling Google Meet consultation:", error);
+    return {
+      success: false,
+      message: error.message || "حدث خطأ غير متوقع أثناء الجدولة.",
+    };
+  }
+}
+
+// Function to get Google Meet consultation history
+export async function getGoogleMeetConsultationHistory(userId: string) {
+  try {
+    const consultsCollection = collection(db, "googleMeetConsults");
+    const q = query(consultsCollection, where("userId", "==", userId));
+    const querySnapshot = await getDocs(q);
+    
+    const consultations = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    return { success: true, consultations };
+  } catch (error: any) {
+    console.error("Error fetching Google Meet consultation history:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to get available time slots for a date
+export async function getAvailableTimeSlots(date: string) {
+  try {
+    const timeSlots = await googleCalendarService.getAvailableTimeSlots(date);
+    return { success: true, timeSlots };
+  } catch (error: any) {
+    console.error("Error fetching available time slots:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to get bookable days for a month
+export async function getBookableDays(year: number, month: number) {
+  try {
+    const days = await googleCalendarService.getBookableDays(year, month);
+    return { success: true, days };
+  } catch (error: any) {
+    console.error("Error fetching bookable days:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Legacy function for backward compatibility - now redirects to Google Meet
 export async function scheduleWebRtcConsultation(
     serviceRequestId: string, 
     userId: string, 
     userName: string
 ): Promise<ScheduleResult> {
-  const validation = scheduleSchema.safeParse({ userId, userName, serviceRequestId });
-
-  if (!validation.success) {
-    return { success: false, message: "بيانات الجدولة المقدمة غير صالحة." };
-  }
+  console.warn("scheduleWebRtcConsultation is deprecated. Use scheduleGoogleMeetConsultation instead.");
   
-  const { serviceRequestId: validatedRequestId, userId: validatedUserId, userName: validatedUserName } = validation.data;
-
   try {
-    // The roomId is now just the service request ID for simplicity.
-    // The actual WebRTC session documents will be in a different collection.
-    const roomId = validatedRequestId;
+    // Get user email from service request
+    const requestDocRef = doc(db, "serviceRequests", serviceRequestId);
+    const requestDoc = await getDoc(requestDocRef);
     
-    // Update the original service request with the meeting ID
-    const requestDocRef = doc(db, "serviceRequests", validatedRequestId);
-    await updateDoc(requestDocRef, {
-      meetingUrl: roomId, // Store the room ID here
-      status: "confirmed",
-    });
+    if (!requestDoc.exists()) {
+      return { success: false, message: "طلب الخدمة غير موجود." };
+    }
 
-    // You can optionally still create a record in 'videoConsults' if you need it for history/logging
-    const consultsCollection = collection(db, "videoConsults");
-    const newConsultDoc = await addDoc(consultsCollection, {
-      roomId: roomId,
-      serviceRequestId: validatedRequestId,
-      userId: validatedUserId,
-      userName: validatedUserName,
-      providerId: "eQwXAu9jw7cL0YtMHA3WuQznKfg1", // The Admin/Provider UID
-      providerName: "DigitalMen0 دعم",
-      status: 'scheduled', // scheduled, completed, cancelled
-      createdAt: serverTimestamp(),
-      consultationTime: serverTimestamp(), // In a real scenario this would be a future date from the request
-    });
+    const requestData = requestDoc.data();
+    const userEmail = requestData.email || '';
 
+    if (!userEmail) {
+      return { success: false, message: "عنوان البريد الإلكتروني مطلوب." };
+    }
 
-    return {
-      success: true,
-      message: `تم جدولة استشارة WebRTC بنجاح.`,
-      roomId: roomId,
-      consultId: newConsultDoc.id,
-    };
+    // Create a default appointment time (next available slot)
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    tomorrow.setHours(9, 0, 0, 0); // 9 AM tomorrow
+    
+    const startDateTime = tomorrow.toISOString();
+    const endDateTime = new Date(tomorrow.getTime() + 40 * 60000).toISOString(); // 40 minutes later
+
+    return await scheduleGoogleMeetConsultation(
+      serviceRequestId,
+      userId,
+      userName,
+      userEmail,
+      startDateTime,
+      endDateTime,
+      `Consultation with ${userName}`,
+      `Digital marketing consultation for service request ${serviceRequestId}`
+    );
   } catch (error: any) {
-    console.error("Error scheduling WebRTC consultation:", error);
+    console.error("Error in legacy scheduleWebRtcConsultation:", error);
     return {
       success: false,
       message: error.message || "حدث خطأ غير متوقع أثناء الجدولة.",

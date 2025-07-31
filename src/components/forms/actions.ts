@@ -6,8 +6,7 @@ import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { v2 as cloudinary } from 'cloudinary';
 import { isToday } from "date-fns";
-import { Resend } from 'resend';
-import ConfirmationEmail from '@/components/emails/ConfirmationEmail';
+import { emailService } from '@/lib/email';
 
 const SERVICE_PROVIDER_UID = "eQwXAu9jw7cL0YtMHA3WuQznKfg1";
 
@@ -16,9 +15,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-
 
 // --- Schema moved outside the action function ---
 const selectedSlotSchema = z.object({
@@ -79,79 +75,73 @@ export async function submitRequest(
     }
     
     let paymentProofCloudinaryInfo: { cloudinaryUrl?: string; cloudinaryPublicId?: string; fileName?: string; fileType?: string; } | null = null;
-
-    if (serviceType === 'consultation') {
-        if (!paymentProof?.base64) {
-            throw new Error("إثبات الدفع مطلوب لخدمة الاستشارة.");
-        }
-       
-        if (selectedSlots.length !== 1) {
-            throw new Error("يجب اختيار موعد واحد فقط للاستشارة.");
-        }
-
-        const uploadResult = await cloudinary.uploader.upload(paymentProof.base64, {
-            folder: "digitalmen0/payment_proofs",
-            resource_type: "image"
+    
+    // Handle payment proof upload if provided
+    if (paymentProof?.base64 && paymentProof?.fileName && paymentProof?.fileType) {
+      try {
+        const uploadResponse = await cloudinary.uploader.upload(paymentProof.base64, {
+          resource_type: 'auto',
+          folder: 'payment-proofs',
+          public_id: `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         });
-
-         if (!uploadResult || !uploadResult.secure_url) {
-           return { success: false, error: "فشل تحميل إثبات الدفع إلى Cloudinary." };
-         }
-         paymentProofCloudinaryInfo = {
-           cloudinaryUrl: uploadResult.secure_url,
-           cloudinaryPublicId: uploadResult.public_id,
-           fileName: paymentProof.fileName,
-           fileType: paymentProof.fileType,
-         };
-
-    } else if (serviceType === 'coaching') {
-        if (selectedSlots.length > 4) {
-            throw new Error("يمكنك اختيار 4 مواعيد كحد أقصى للتدريب.");
-        }
-        const dates = selectedSlots.map(slot => slot.date);
-        const uniqueDates = new Set(dates);
-        if (uniqueDates.size !== dates.length) {
-            throw new Error("يجب أن تكون كل جلسة تدريب في يوم مختلف.");
-        }
+        
+        paymentProofCloudinaryInfo = {
+          cloudinaryUrl: uploadResponse.secure_url,
+          cloudinaryPublicId: uploadResponse.public_id,
+          fileName: paymentProof.fileName,
+          fileType: paymentProof.fileType,
+        };
+        
+        console.log("Payment proof uploaded successfully:", paymentProofCloudinaryInfo);
+      } catch (uploadError) {
+        console.error("Failed to upload payment proof:", uploadError);
+        // Don't fail the entire request if payment proof upload fails
+        // Just log the error and continue without payment proof
+      }
     }
     
-    const userId = `user_anon_${Date.now()}`;
-    const userName = `${restOfData.name} ${restOfData.surname}`;
-
+    const userName = `${validatedData.name} ${validatedData.surname}`;
+    const createdAt = new Date().toISOString();
+    
+    // Prepare data for Firestore
     const dataToStore = {
-      userId: userId,
-      providerId: SERVICE_PROVIDER_UID, 
       ...restOfData,
-      serviceType: serviceType,
-      selectedSlots: selectedSlots,
-      paymentProofInfo: paymentProofCloudinaryInfo, 
-      status: "pending", 
+      userName,
+      serviceType,
+      meetingType,
+      selectedSlots,
+      paymentProof: paymentProofCloudinaryInfo,
+      status: "pending", // pending, confirmed, completed, cancelled
+      serviceProviderUid: SERVICE_PROVIDER_UID,
       createdAt: serverTimestamp(),
-      userEmail: restOfData.email, 
-      userName: userName, 
-      meetingUrl: null,
+      updatedAt: serverTimestamp(),
     };
 
     const docRef = await addDoc(collection(db, "serviceRequests"), dataToStore);
 
-    // Send confirmation email
-    if (resend) {
-        try {
-            await resend.emails.send({
-                from: 'DigitalMen0 <onboarding@resend.dev>',
-                to: [validatedData.email],
-                subject: 'تم تأكيد استلام طلبك | Your Request Confirmation',
-                react: ConfirmationEmail({
-                    name: userName,
-                    requestId: docRef.id.substring(0, 8).toUpperCase(),
-                })
-            });
-        } catch (emailError) {
-            console.warn("Request saved, but failed to send confirmation email:", emailError);
-            // Don't block the user flow if email fails. Just log the issue.
-        }
-    } else {
-        console.warn("RESEND_API_KEY not found. Skipping confirmation email.");
+    // Send confirmation email using Nodemailer
+    try {
+      const emailResult = await emailService.sendRequestConfirmation({
+        name: userName,
+        requestId: docRef.id.substring(0, 8).toUpperCase(),
+        serviceType,
+        meetingType,
+        problemDescription: validatedData.problemDescription,
+        selectedSlots,
+        email: validatedData.email,
+        phone: validatedData.phone,
+        createdAt,
+      });
+
+      if (emailResult.success) {
+        console.log('Request confirmation email sent successfully:', emailResult.messageId);
+      } else {
+        console.warn('Request saved, but failed to send confirmation email:', emailResult.error);
+        // Don't block the user flow if email fails. Just log the issue.
+      }
+    } catch (emailError) {
+      console.warn("Request saved, but failed to send confirmation email:", emailError);
+      // Don't block the user flow if email fails. Just log the issue.
     }
     
     return { success: true, requestId: docRef.id };
