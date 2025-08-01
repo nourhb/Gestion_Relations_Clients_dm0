@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
+
 import GoogleMeetBooking from '@/components/meeting/GoogleMeetBooking';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,6 @@ import { useToast } from '@/hooks/use-toast';
 
 const MeetingPageContent = () => {
   const searchParams = useSearchParams();
-  const { user } = useAuth();
   const { toast } = useToast();
   
   const [meetLink, setMeetLink] = useState('');
@@ -59,14 +58,7 @@ const MeetingPageContent = () => {
   };
 
   const handleStartBooking = () => {
-    if (!user) {
-      toast({
-        variant: "destructive",
-        title: "Authentication Required",
-        description: "Please log in to book a consultation",
-      });
-      return;
-    }
+    // Allow anyone to start booking - no authentication required
     setShowBookingForm(true);
   };
 
@@ -144,8 +136,8 @@ const MeetingPageContent = () => {
     }
   };
 
-  // Show booking form if requested
-  if (showBookingForm && user) {
+  // Show booking form if requested - no authentication required
+  if (showBookingForm) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
         <div className="container mx-auto px-4 py-6">
@@ -162,9 +154,9 @@ const MeetingPageContent = () => {
           </div>
           <GoogleMeetBooking
             serviceRequestId={serviceRequestId || `req_${Date.now()}`}
-            userId={user.uid}
-            userName={user.displayName || user.email || 'User'}
-            userEmail={user.email || ''}
+            userId={user?.uid || `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`}
+            userName={user?.displayName || user?.email || 'Guest User'}
+            userEmail={user?.email || ''}
             onBookingComplete={handleBookingComplete}
           />
         </div>
@@ -313,16 +305,10 @@ const MeetingPageContent = () => {
                   onClick={handleStartBooking}
                   className="w-full"
                   size="lg"
-                  disabled={!user}
                 >
                   <Video className="w-4 h-4 mr-2" />
                   Schedule Consultation
                 </Button>
-                {!user && (
-                  <p className="text-xs text-amber-600 text-center">
-                    Please log in to schedule a consultation
-                  </p>
-                )}
               </CardContent>
             </Card>
 
