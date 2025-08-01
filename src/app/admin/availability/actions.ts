@@ -148,17 +148,23 @@ export async function getCombinedAvailability(
     // 3. Get booked slots for the provider on that specific date
     const bookedTimes = new Set<string>();
     const requestsCollectionRef = collection(db, "serviceRequests");
-    const q = query(requestsCollectionRef, where("providerId", "==", providerId));
+    const q = query(requestsCollectionRef, where("serviceProviderUid", "==", providerId));
     
     const querySnapshot = await getDocs(q);
+    console.log(`Found ${querySnapshot.size} total service requests for provider ${providerId}`);
+    
     querySnapshot.forEach((docSnap) => {
       const requestData = docSnap.data();
-      if (requestData.status === 'cancelled') return; // Only block non-cancelled
+      if (requestData.status === 'cancelled') {
+        console.log(`Skipping cancelled request ${docSnap.id}`);
+        return; // Only block non-cancelled
+      }
       if (requestData.selectedSlots && Array.isArray(requestData.selectedSlots)) {
         requestData.selectedSlots.forEach((slot: any) => { 
           if (typeof slot === 'object' && slot !== null && typeof slot.date === 'string' && typeof slot.time === 'string') {
             if (slot.date === date) { 
               bookedTimes.add(slot.time);
+              console.log(`Blocking time ${slot.time} from request ${docSnap.id} (${requestData.status})`);
             }
           }
         });
@@ -178,6 +184,84 @@ export async function getCombinedAvailability(
       success: false,
       error: error.message || "حدث خطأ غير متوقع أثناء جلب المواعيد المجمعة.",
       finalSlots: [], 
+    };
+  }
+}
+
+/**
+ * Debug function to check the current state of availability and bookings
+ * This helps identify issues with the availability system
+ */
+export async function debugAvailability(providerId: string, date: string): Promise<any> {
+  try {
+    console.log(`=== DEBUGGING AVAILABILITY FOR ${providerId} ON ${date} ===`);
+    
+    // 1. Check daily override
+    const dailyOverrideResult = await getAvailability(providerId, date);
+    console.log('Daily override result:', dailyOverrideResult);
+    
+    // 2. Check weekly template
+    const weeklyTemplateResult = await getWeeklyTemplate(providerId);
+    console.log('Weekly template result:', weeklyTemplateResult);
+    
+    // 3. Check all service requests for this provider
+    const requestsCollectionRef = collection(db, "serviceRequests");
+    const q = query(requestsCollectionRef, where("serviceProviderUid", "==", providerId));
+    const querySnapshot = await getDocs(q);
+    
+    const allRequests = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    console.log(`Total service requests for provider ${providerId}:`, allRequests.length);
+    
+    // 4. Check requests for the specific date
+    const requestsForDate = allRequests.filter(req => {
+      if (req.status === 'cancelled') return false;
+      if (req.selectedSlots && Array.isArray(req.selectedSlots)) {
+        return req.selectedSlots.some((slot: any) => 
+          typeof slot === 'object' && slot !== null && 
+          typeof slot.date === 'string' && slot.date === date
+        );
+      }
+      return false;
+    });
+    
+    console.log(`Requests for date ${date}:`, requestsForDate);
+    
+    // 5. Get booked times for this date
+    const bookedTimes = new Set<string>();
+    requestsForDate.forEach(req => {
+      if (req.selectedSlots && Array.isArray(req.selectedSlots)) {
+        req.selectedSlots.forEach((slot: any) => { 
+          if (typeof slot === 'object' && slot !== null && 
+              typeof slot.date === 'string' && typeof slot.time === 'string') {
+            if (slot.date === date) { 
+              bookedTimes.add(slot.time);
+            }
+          }
+        });
+      }
+    });
+    
+    console.log(`Booked times for ${date}:`, Array.from(bookedTimes));
+    
+    return {
+      success: true,
+      dailyOverride: dailyOverrideResult,
+      weeklyTemplate: weeklyTemplateResult,
+      totalRequests: allRequests.length,
+      requestsForDate: requestsForDate.length,
+      bookedTimes: Array.from(bookedTimes),
+      requestsForDateDetails: requestsForDate
+    };
+    
+  } catch (error: any) {
+    console.error("Error in debugAvailability:", error);
+    return {
+      success: false,
+      error: error.message
     };
   }
 }
