@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, query, where, getDocs, getDoc } from 'firebase/firestore';
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,10 +35,36 @@ export async function GET(request: NextRequest) {
           currentDate.setHours(0, 0, 0, 0);
           
           if (currentDate >= today) {
+            // Check if this day has available time slots
+            const startOfDay = new Date(currentDate);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(currentDate);
+            endOfDay.setHours(23, 59, 59, 999);
+
+            // Fetch existing bookings for this day
+            const consultsQuery = query(
+              collection(db, "googleMeetConsults"),
+              where("startTime", ">=", startOfDay.toISOString()),
+              where("startTime", "<=", endOfDay.toISOString()),
+              where("status", "==", "scheduled")
+            );
+
+            const consultsSnapshot = await getDocs(consultsQuery);
+            const existingBookings = consultsSnapshot.docs.length;
+
+            // Calculate total possible slots for this day (9 AM to 6 PM, 40-minute slots)
+            const totalSlots = Math.floor((18 - 9) * 60 / 40); // 13 slots
+            
+            // Day is available if there are fewer bookings than total slots
+            const hasAvailableSlots = existingBookings < totalSlots;
+
             days.push({
               day,
               date: currentDate.toISOString().split('T')[0],
-              available: true
+              available: true,
+              hasTimeSlots: hasAvailableSlots,
+              bookedSlots: existingBookings,
+              totalSlots: totalSlots
             });
           }
         }
@@ -63,6 +89,28 @@ export async function GET(request: NextRequest) {
       const timeSlots = [];
       const baseDate = new Date(year, month - 1, day);
       
+      // Get existing bookings for this date
+      const dateString = baseDate.toISOString().split('T')[0];
+      const startOfDay = new Date(baseDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(baseDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Fetch existing bookings from googleMeetConsults collection
+      const consultsQuery = query(
+        collection(db, "googleMeetConsults"),
+        where("startTime", ">=", startOfDay.toISOString()),
+        where("startTime", "<=", endOfDay.toISOString()),
+        where("status", "==", "scheduled")
+      );
+
+      const consultsSnapshot = await getDocs(consultsQuery);
+      const existingBookings = consultsSnapshot.docs.map(doc => ({
+        startTime: doc.data().startTime,
+        endTime: doc.data().endTime
+      }));
+
+      // Generate all possible time slots
       for (let hour = 9; hour < 18; hour++) {
         for (let minute = 0; minute < 60; minute += 40) {
           const startTime = new Date(baseDate);
@@ -73,10 +121,19 @@ export async function GET(request: NextRequest) {
           
           // Don't create slots that would end after 6 PM
           if (endTime.getHours() <= 18) {
+            // Check if this time slot conflicts with existing bookings
+            const isBooked = existingBookings.some(booking => {
+              const bookingStart = new Date(booking.startTime);
+              const bookingEnd = new Date(booking.endTime);
+              
+              // Check for overlap
+              return (startTime < bookingEnd && endTime > bookingStart);
+            });
+
             timeSlots.push({
               startTime: startTime.toISOString(),
               endTime: endTime.toISOString(),
-              available: true
+              available: !isBooked
             });
           }
         }
@@ -93,6 +150,62 @@ export async function GET(request: NextRequest) {
     console.error('Meeting API error:', error);
     return NextResponse.json(
       { success: false, error: error.message || 'Meeting operation failed' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const consultId = searchParams.get('consultId');
+
+    if (!consultId) {
+      return NextResponse.json(
+        { success: false, error: 'Consultation ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get the consultation document
+    const consultDocRef = doc(db, "googleMeetConsults", consultId);
+    const consultDoc = await getDoc(consultDocRef);
+    
+    if (!consultDoc.exists()) {
+      return NextResponse.json(
+        { success: false, error: 'Consultation not found' },
+        { status: 404 }
+      );
+    }
+
+    const consultData = consultDoc.data();
+    const serviceRequestId = consultData.serviceRequestId;
+
+    // Update the consultation status to cancelled
+    await updateDoc(consultDocRef, {
+      status: 'cancelled',
+      updatedAt: serverTimestamp(),
+    });
+
+    // Also update the service request status if it exists
+    if (serviceRequestId) {
+      const requestDocRef = doc(db, "serviceRequests", serviceRequestId);
+      await updateDoc(requestDocRef, {
+        status: "cancelled",
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Consultation cancelled successfully',
+      consultId: consultId
+    });
+
+  } catch (error: any) {
+    console.error('Cancel consultation error:', error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to cancel consultation' },
       { status: 500 }
     );
   }
