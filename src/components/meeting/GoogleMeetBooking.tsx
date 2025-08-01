@@ -54,7 +54,7 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth() + 1;
       
-      const response = await fetch(`/api/google-calendar?action=days&year=${year}&month=${month}`);
+      const response = await fetch(`/api/meeting?action=days&year=${year}&month=${month}`);
       const data = await response.json();
       
       if (data.success) {
@@ -87,7 +87,7 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
       const month = date.getMonth() + 1;
       const day = date.getDate();
       
-      const response = await fetch(`/api/google-calendar?action=timeslots&year=${year}&month=${month}&day=${day}`);
+      const response = await fetch(`/api/meeting?action=timeslots&year=${year}&month=${month}&day=${day}`);
       const data = await response.json();
       
       if (data.success) {
@@ -124,7 +124,7 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
     try {
       const startDateTime = new Date(selectedTimeSlot.startTime);
       
-      const response = await fetch('/api/google-calendar', {
+      const response = await fetch('/api/meeting', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -149,8 +149,8 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
       
       if (data.success) {
         toast({
-          title: "Booking Confirmed!",
-          description: "Your Google Meet consultation has been scheduled.",
+                     title: "Booking Confirmed!",
+           description: "Your Jitsi Meet consultation has been scheduled.",
         });
         onBookingComplete(data.meetLink);
       } else {
@@ -218,7 +218,7 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Calendar className="h-6 w-6 text-blue-600" />
-            <span>Schedule Google Meet Consultation</span>
+                         <span>Schedule Jitsi Meet Consultation</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -233,7 +233,7 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
             </div>
             <div className="flex items-center space-x-2">
               <ExternalLink className="h-4 w-4 text-gray-500" />
-              <span>Google Meet link provided</span>
+                             <span>Jitsi Meet link provided</span>
             </div>
           </div>
         </CardContent>
@@ -366,8 +366,8 @@ const GoogleMeetBooking: React.FC<GoogleMeetBookingProps> = ({
                   <p className="text-sm text-gray-600">DigitalMen0 دعم</p>
                 </div>
                 <div>
-                  <h4 className="font-medium text-gray-900">Meeting Type</h4>
-                  <p className="text-sm text-gray-600">Google Meet Video Call</p>
+                                     <h4 className="font-medium text-gray-900">Meeting Type</h4>
+                   <p className="text-sm text-gray-600">Jitsi Meet Video Call</p>
                 </div>
               </div>
               
