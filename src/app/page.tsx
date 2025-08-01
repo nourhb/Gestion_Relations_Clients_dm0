@@ -7,7 +7,7 @@ import Image from 'next/image';
 
 export default function HomePage() {
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
       <section className="text-center mb-12">
         <h1 className="text-3xl font-bold mb-3 text-primary">مرحباً بك في DigitalMen0</h1>
         <p className="text-lg text-foreground/80 max-w-2xl mx-auto mb-6">

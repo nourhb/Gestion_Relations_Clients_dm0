@@ -294,7 +294,7 @@ function AdminRequestsPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-12 space-y-8">
+    <div className="container mx-auto px-4 py-12 space-y-8 max-w-7xl">
       
       <RequestsDashboard requests={requests} />
       

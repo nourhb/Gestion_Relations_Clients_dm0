@@ -6,7 +6,7 @@ import { Suspense } from "react";
 
 function LoginPageContent() {
   return (
-    <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)]">
+    <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)] max-w-7xl">
       <LoginForm isAdminLogin={true} />
     </div>
   );

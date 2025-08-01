@@ -329,7 +329,7 @@ function ChatPageContent() {
           </form>
         </DialogContent>
       </Dialog>
-      <div className="container mx-auto px-2 py-4 md:px-4 md:py-6 flex flex-col h-[calc(100vh-10rem)] max-w-3xl">
+      <div className="container mx-auto px-2 py-4 md:px-4 md:py-6 flex flex-col h-[calc(100vh-10rem)] max-w-4xl">
         <Card className="flex flex-col flex-1 shadow-xl">
           <CardHeader className="border-b py-4">
             <CardTitle className="text-lg text-primary flex items-center">

@@ -13,7 +13,7 @@ function RequestPageContent() {
   const serviceTypeParam = searchParams.get('service') as "coaching" | "consultation" | null;
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
       <section className="text-center mb-8">
         <h1 className="text-3xl font-bold mb-3 text-primary">طلب خدمة</h1>
         <p className="text-base text-foreground/80 max-w-xl mx-auto">

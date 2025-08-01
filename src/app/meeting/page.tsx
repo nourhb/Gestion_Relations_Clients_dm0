@@ -270,7 +270,7 @@ const MeetingPageContent = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="max-w-2xl mx-auto">
           {/* Header */}
           <div className="text-center mb-8">

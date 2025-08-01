@@ -34,7 +34,7 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 max-w-screen-2xl items-center">
+      <div className="container flex h-14 max-w-7xl items-center">
         <Link href="/" className="mr-6 flex items-center space-x-2 rtl:ml-6 rtl:mr-0">
           <span className="font-bold text-xl text-primary">DigitalMen0</span>
         </Link>

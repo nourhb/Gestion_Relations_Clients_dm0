@@ -114,14 +114,14 @@ export default function AdminAvailabilityPage() {
   
   if (authLoading || !user) {
     return (
-      <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)]">
+      <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)] max-w-7xl">
         <p>جاري التحميل...</p>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-12">
+    <div className="container mx-auto px-4 py-12 max-w-7xl">
       <Card className="max-w-4xl mx-auto shadow-xl">
         <CardHeader>
           <div className="flex items-center gap-3 mb-2">

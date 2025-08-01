@@ -276,7 +276,7 @@ function AdminChatPageContent() {
 
   if (authLoading || !user) {
     return (
-      <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)]">
+      <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-8rem)] max-w-7xl">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
       </div>
     );
@@ -285,7 +285,7 @@ function AdminChatPageContent() {
   return (
     <>
       <audio ref={audioRef} src="/notification.mp3" preload="auto"></audio>
-      <div className="container mx-auto px-0 py-4 flex flex-row h-[calc(100vh-8rem)] gap-4">
+      <div className="container mx-auto px-0 py-4 flex flex-row h-[calc(100vh-8rem)] gap-4 max-w-7xl">
         {/* Sidebar for Chat Sessions */}
         <Card className="w-1/3 lg:w-1/4 flex flex-col shadow-lg">
           <CardHeader className="border-b">

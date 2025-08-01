@@ -108,6 +108,7 @@
   body {
     @apply bg-background text-foreground;
     /* Default font-family removed, next/font will handle it */
+    overflow-x: hidden; /* Prevent horizontal scrolling */
   }
 }
 
